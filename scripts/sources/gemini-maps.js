@@ -6,7 +6,8 @@
 
 import { normalizePhone } from '../utils/phoneUtils.js';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+// Use the correct Gemini API endpoint
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
 
 // Simple logger for this module
 const log = {
