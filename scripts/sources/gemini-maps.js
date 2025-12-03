@@ -71,87 +71,48 @@ Return ONLY a valid JSON array with no additional text or markdown. Example form
         contents: [{
           parts: [{ text: prompt }]
         }],
-        // Enable Google Maps grounding tool
-        tools: [{ googleMaps: {} }],
+        // Try with Google Search grounding for more reliable results
+        tools: [{ 
+          google_search: {} 
+        }],
         generationConfig: {
-          temperature: 0.1,
+          temperature: 0.2,
           maxOutputTokens: 8192
         }
       })
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error?.message || `API error: ${response.status}`);
+      const errorData = await response.text();
+      log.error('Gemini API error response:', errorData);
+      
+      // If google_search tool fails, try without tools
+      log.info('Retrying without grounding tools...');
+      const fallbackResponse = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 8192
+          }
+        })
+      });
+      
+      if (!fallbackResponse.ok) {
+        const fallbackError = await fallbackResponse.text();
+        throw new Error(`API error: ${fallbackError}`);
+      }
+      
+      const fallbackData = await fallbackResponse.json();
+      return processGeminiResponse(fallbackData, city, state, location, onProgress);
     }
 
     const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    log.debug('Gemini Maps response received, parsing...');
-
-    // Parse the JSON response
-    let clinics = [];
-    try {
-      // Extract JSON from response (might have markdown code blocks)
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        clinics = JSON.parse(jsonMatch[0]);
-      }
-    } catch (parseError) {
-      log.warn('Failed to parse Gemini response as JSON, attempting extraction:', parseError.message);
-      clinics = extractClinicsFromText(text, location);
-    }
-
-    // Process and normalize the results
-    const results = clinics.map((clinic, index) => {
-      const normalized = {
-        name: clinic.name || 'Unknown Dental Clinic',
-        clinic_name: clinic.name || 'Unknown Dental Clinic',
-        address: clinic.address || location,
-        phone: clinic.phone || null,
-        phone_e164: clinic.phone ? normalizePhone(clinic.phone) : null,
-        email: clinic.email || null,
-        rating: clinic.rating || null,
-        reviewCount: clinic.reviewCount || null,
-        website: clinic.website || null,
-        hours: clinic.hours || null,
-        services: Array.isArray(clinic.services) ? clinic.services.join(', ') : clinic.services || null,
-        source: 'gemini-maps',
-        city: city,
-        state: state,
-        scrapedAt: new Date().toISOString(),
-      };
-
-      onProgress({ 
-        message: `Found: ${normalized.name}`, 
-        count: index + 1,
-        clinic: normalized
-      });
-
-      return normalized;
-    }).filter(c => c.name && c.name !== 'Unknown Dental Clinic');
-
-    // Check for grounding metadata (sources from Google Maps)
-    const groundingMetadata = data.candidates?.[0]?.groundingMetadata;
-    if (groundingMetadata?.groundingChunks) {
-      const sources = groundingMetadata.groundingChunks;
-      log.info(`📍 Grounded with ${sources.length} Google Maps sources`);
-      
-      // Enhance results with place IDs if available
-      sources.forEach((source, idx) => {
-        if (source.maps && results[idx]) {
-          results[idx].placeId = source.maps.placeId;
-          results[idx].mapsUrl = source.maps.uri;
-          results[idx].source_url = source.maps.uri;
-        }
-      });
-    }
-
-    log.success(`✅ Gemini Maps found ${results.length} dental clinics in ${location}`);
-    onProgress({ message: `Completed! Found ${results.length} clinics`, count: results.length, done: true });
-
-    return results;
+    return processGeminiResponse(data, city, state, location, onProgress);
 
   } catch (error) {
     log.error('Gemini Maps scraping error:', error.message);
@@ -166,6 +127,79 @@ Return ONLY a valid JSON array with no additional text or markdown. Example form
     
     throw error;
   }
+}
+
+/**
+ * Process Gemini API response into clinic data
+ */
+function processGeminiResponse(data, city, state, location, onProgress) {
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  
+  log.debug('Gemini response received, parsing...');
+  log.debug('Response text length:', text.length);
+
+  // Parse the JSON response
+  let clinics = [];
+  try {
+    // Extract JSON from response (might have markdown code blocks)
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      clinics = JSON.parse(jsonMatch[0]);
+    } else {
+      log.warn('No JSON array found in response');
+      clinics = extractClinicsFromText(text, location);
+    }
+  } catch (parseError) {
+    log.warn('Failed to parse Gemini response as JSON:', parseError.message);
+    clinics = extractClinicsFromText(text, location);
+  }
+
+  // Process and normalize the results
+  const results = clinics.map((clinic, index) => {
+    const normalized = {
+      name: clinic.name || 'Unknown Dental Clinic',
+      clinic_name: clinic.name || 'Unknown Dental Clinic',
+      address: clinic.address || location,
+      phone: clinic.phone || null,
+      phone_e164: clinic.phone ? normalizePhone(clinic.phone) : null,
+      email: clinic.email || null,
+      rating: clinic.rating || null,
+      reviewCount: clinic.reviewCount || null,
+      website: clinic.website || null,
+      hours: clinic.hours || null,
+      services: Array.isArray(clinic.services) ? clinic.services.join(', ') : clinic.services || null,
+      source: 'gemini-maps',
+      city: city,
+      state: state,
+      scrapedAt: new Date().toISOString(),
+    };
+
+    onProgress({ 
+      message: `Found: ${normalized.name}`, 
+      count: index + 1,
+      clinic: normalized
+    });
+
+    return normalized;
+  }).filter(c => c.name && c.name !== 'Unknown Dental Clinic');
+
+  // Check for grounding metadata
+  const groundingMetadata = data.candidates?.[0]?.groundingMetadata;
+  if (groundingMetadata?.groundingChunks) {
+    const sources = groundingMetadata.groundingChunks;
+    log.info(`📍 Grounded with ${sources.length} sources`);
+    
+    sources.forEach((source, idx) => {
+      if (source.web && results[idx]) {
+        results[idx].source_url = source.web.uri;
+      }
+    });
+  }
+
+  log.success(`✅ Gemini found ${results.length} dental clinics in ${location}`);
+  onProgress({ message: `Completed! Found ${results.length} clinics`, count: results.length, done: true });
+
+  return results;
 }
 
 /**

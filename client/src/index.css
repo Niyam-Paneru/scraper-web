@@ -536,6 +536,7 @@ td a:hover {
 .jobs-list {
   max-height: 200px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .job-item {
@@ -550,9 +551,6 @@ td a:hover {
 
 .job-item:hover {
   background: var(--gray-50);
-  margin: 0 -1rem;
-  padding-left: 1rem;
-  padding-right: 1rem;
 }
 
 .job-item:last-child {
