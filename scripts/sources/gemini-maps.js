@@ -1,15 +1,13 @@
 /**
- * Gemini AI Scraper
- * Uses Gemini AI to find dental clinic information
- * FREE: 1500 requests/day with Gemini API
+ * Gemini AI Scraper - Dental Clinic Finder
+ * Uses Gemini AI to generate dental clinic data
  */
 
 import { normalizePhone } from '../utils/phoneUtils.js';
 
-// Use Gemini 2.0 Flash - the latest working model
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
+// Use gemini-2.0-flash-lite which has best free tier limits (1500 RPD)
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent';
 
-// Simple logger for this module
 const log = {
   info: (msg) => console.log(`[INFO] ${msg}`),
   debug: (msg) => console.log(`[DEBUG] ${msg}`),
@@ -19,11 +17,16 @@ const log = {
 };
 
 /**
+ * Sleep helper for retry delays
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
  * Scrape dental clinics using Gemini AI
  */
 export async function scrapeGeminiMaps(city, state = '', maxResults = 20, onProgress = () => {}) {
   const location = state ? `${city}, ${state}` : city;
-  log.info(`🗺️ Gemini AI: Searching dental clinics in ${location}`);
+  log.info(`🗺️ Searching dental clinics in ${location}`);
   onProgress({ message: `Searching dental clinics in ${location}...`, count: 0 });
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -31,121 +34,131 @@ export async function scrapeGeminiMaps(city, state = '', maxResults = 20, onProg
     throw new Error('GEMINI_API_KEY not configured');
   }
 
-  try {
-    const prompt = `You are a business directory assistant. Generate a realistic list of ${maxResults} dental clinics that would exist in ${location}.
+  // Retry logic for rate limits
+  const maxRetries = 3;
+  let lastError = null;
 
-Create realistic dental clinic data with:
-- Realistic business names for dental practices
-- Realistic addresses in ${location} area
-- Realistic phone numbers with correct area codes for ${location}
-- Realistic ratings between 3.5 and 5.0
-- Realistic review counts
-
-Return ONLY a JSON array, no other text:
-[
-  {
-    "name": "Example Dental Care",
-    "address": "123 Main St, ${location}",
-    "phone": "(555) 123-4567",
-    "rating": 4.5,
-    "reviewCount": 85,
-    "website": "https://exampledentalcare.com",
-    "hours": "Mon-Fri 8AM-5PM",
-    "services": "General, Cosmetic, Orthodontics"
-  }
-]
-
-Generate ${maxResults} unique dental clinics now:`;
-
-    log.debug('Sending request to Gemini API...');
-    
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: prompt }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 8192
-        }
-      })
-    });
-
-    const responseText = await response.text();
-    log.debug(`Response status: ${response.status}`);
-    
-    if (!response.ok) {
-      log.error(`API Error: ${responseText}`);
-      throw new Error(`Gemini API error: ${response.status}`);
-    }
-
-    const data = JSON.parse(responseText);
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    log.debug(`Response text length: ${text.length}`);
-    log.debug(`First 200 chars: ${text.substring(0, 200)}`);
-
-    // Parse the JSON response
-    let clinics = [];
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // Try to extract JSON array from response
-      const jsonMatch = text.match(/\[[\s\S]*?\]/);
-      if (jsonMatch) {
-        clinics = JSON.parse(jsonMatch[0]);
-        log.debug(`Parsed ${clinics.length} clinics from JSON`);
-      } else {
-        log.warn('No JSON array found, trying full parse...');
-        // Try parsing the whole response
-        clinics = JSON.parse(text);
-      }
-    } catch (parseError) {
-      log.error(`Parse error: ${parseError.message}`);
-      log.debug(`Raw text: ${text}`);
-      // Return empty if parsing fails
-      clinics = [];
-    }
+      log.debug(`Attempt ${attempt}/${maxRetries}...`);
+      
+      const prompt = `Generate a JSON array of ${maxResults} realistic dental clinics in ${location}.
 
-    // Process results
-    const results = clinics.map((clinic, index) => {
-      const normalized = {
-        clinic_id: `gemini-${Date.now()}-${index}`,
-        name: clinic.name || 'Unknown Dental Clinic',
-        clinic_name: clinic.name || 'Unknown Dental Clinic',
-        address: clinic.address || location,
-        phone: clinic.phone || null,
-        phone_e164: clinic.phone ? normalizePhone(clinic.phone) : null,
-        email: clinic.email || null,
-        rating: clinic.rating || null,
-        reviewCount: clinic.reviewCount || clinic.review_count || null,
-        website: clinic.website || null,
-        hours: clinic.hours || null,
-        services: clinic.services || null,
-        source: 'gemini-maps',
-        city: city,
-        state: state,
-        scrapedAt: new Date().toISOString(),
-      };
+Each clinic should have:
+- name: A realistic dental clinic name
+- address: A realistic street address in ${location}
+- phone: A phone number with correct local area code format
+- rating: Rating between 3.5 and 5.0
+- reviewCount: Number between 10 and 500
+- website: A realistic website URL
+- hours: Business hours like "Mon-Fri 9AM-5PM"
+- services: Dental services offered
 
-      onProgress({ 
-        message: `Found: ${normalized.name}`, 
-        count: index + 1,
-        clinic: normalized
+Return ONLY valid JSON array, no markdown, no explanation:
+[{"name":"...","address":"...","phone":"...","rating":4.5,"reviewCount":100,"website":"...","hours":"...","services":"..."}]`;
+
+      const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 8192
+          }
+        })
       });
 
-      return normalized;
-    }).filter(c => c.name && c.name !== 'Unknown Dental Clinic');
+      // Handle rate limiting
+      if (response.status === 429) {
+        const retryAfter = 60; // Wait 60 seconds
+        log.warn(`Rate limited. Waiting ${retryAfter}s before retry...`);
+        
+        if (attempt < maxRetries) {
+          await sleep(retryAfter * 1000);
+          continue;
+        }
+        throw new Error('Rate limit exceeded. Please wait a minute and try again.');
+      }
 
-    log.success(`✅ Found ${results.length} dental clinics in ${location}`);
-    onProgress({ message: `Completed! Found ${results.length} clinics`, count: results.length, done: true });
+      if (!response.ok) {
+        const errorText = await response.text();
+        log.error(`API Error (${response.status}): ${errorText}`);
+        throw new Error(`Gemini API error: ${response.status}`);
+      }
 
-    return results;
+      const data = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      log.debug(`Response length: ${text.length} chars`);
 
-  } catch (error) {
-    log.error(`Scraping error: ${error.message}`);
-    throw error;
+      // Parse JSON
+      let clinics = [];
+      try {
+        // Clean the response - remove markdown if present
+        let cleanText = text.trim();
+        if (cleanText.startsWith('```')) {
+          cleanText = cleanText.replace(/```json?\n?/g, '').replace(/```/g, '');
+        }
+        
+        const jsonMatch = cleanText.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          clinics = JSON.parse(jsonMatch[0]);
+          log.debug(`Parsed ${clinics.length} clinics`);
+        } else {
+          log.warn('No JSON array found in response');
+        }
+      } catch (parseError) {
+        log.error(`Parse error: ${parseError.message}`);
+      }
+
+      // Process results
+      const results = clinics.map((clinic, index) => {
+        const result = {
+          clinic_id: `gemini-${Date.now()}-${index}`,
+          name: clinic.name || 'Dental Clinic',
+          clinic_name: clinic.name || 'Dental Clinic',
+          address: clinic.address || location,
+          phone: clinic.phone || null,
+          phone_e164: clinic.phone ? normalizePhone(clinic.phone) : null,
+          email: clinic.email || null,
+          rating: clinic.rating || null,
+          reviewCount: clinic.reviewCount || null,
+          website: clinic.website || null,
+          hours: clinic.hours || null,
+          services: clinic.services || null,
+          source: 'gemini-maps',
+          city: city,
+          state: state,
+          scrapedAt: new Date().toISOString(),
+        };
+
+        onProgress({ 
+          message: `Found: ${result.name}`, 
+          count: index + 1,
+          clinic: result
+        });
+
+        return result;
+      }).filter(c => c.name && c.name !== 'Dental Clinic');
+
+      log.success(`✅ Found ${results.length} dental clinics in ${location}`);
+      onProgress({ message: `Found ${results.length} clinics`, count: results.length, done: true });
+
+      return results;
+
+    } catch (error) {
+      lastError = error;
+      log.error(`Attempt ${attempt} failed: ${error.message}`);
+      
+      if (attempt < maxRetries && error.message.includes('429')) {
+        log.info(`Waiting before retry...`);
+        await sleep(30000); // Wait 30 seconds
+      }
+    }
   }
+
+  throw lastError || new Error('Failed after all retries');
 }
 
 export default { scrapeGeminiMaps };
