@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 import 'dotenv/config';
 
 import apiRoutes from './routes/api.js';
@@ -26,11 +27,13 @@ app.use(express.json());
 app.use('/api', apiRoutes);
 app.use('/api/ai', aiRoutes);
 
-// Serve static frontend in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/dist')));
+// Serve static frontend (production build)
+const distPath = path.join(__dirname, '../client/dist');
+if (fs.existsSync(distPath)) {
+  console.log('📦 Serving static frontend from client/dist');
+  app.use(express.static(distPath));
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+    res.sendFile(path.join(distPath, 'index.html'));
   });
 }
 
