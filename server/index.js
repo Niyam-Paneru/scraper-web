@@ -32,7 +32,12 @@ const distPath = path.join(__dirname, '../client/dist');
 if (fs.existsSync(distPath)) {
   console.log('📦 Serving static frontend from client/dist');
   app.use(express.static(distPath));
-  app.get('*', (req, res) => {
+  // Only serve index.html for non-API routes
+  app.get('*', (req, res, next) => {
+    // Skip API routes
+    if (req.path.startsWith('/api') || req.path === '/health') {
+      return next();
+    }
     res.sendFile(path.join(distPath, 'index.html'));
   });
 }
