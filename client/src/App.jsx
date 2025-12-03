@@ -758,14 +758,36 @@ function App() {
                             <span>•</span>
                             <span>{row.address}</span>
                           </div>
+                          {row.email && (
+                            <div style={{ fontSize: '0.85rem', color: 'var(--primary)', marginTop: '0.25rem' }}>
+                              📧 {row.email}
+                            </div>
+                          )}
                         </div>
                         <div className="clinic-contact">
                           <div style={{ fontSize: '0.9rem' }}>{row.phone || 'No phone'}</div>
-                          {row.website && (
-                            <a href={row.website} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.8rem', color: 'var(--primary)' }}>
-                              Visit Website
-                            </a>
-                          )}
+                          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                            {row.website && (
+                              <a 
+                                href={row.website.startsWith('http') ? row.website : `https://${row.website}`} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                style={{ fontSize: '0.8rem', color: 'var(--primary)' }}
+                              >
+                                🌐 Website
+                              </a>
+                            )}
+                            {row.mapsUrl && (
+                              <a 
+                                href={row.mapsUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                style={{ fontSize: '0.8rem', color: 'var(--success)' }}
+                              >
+                                📍 Maps
+                              </a>
+                            )}
+                          </div>
                         </div>
                         <div className="clinic-status">
                           <select 
@@ -795,12 +817,26 @@ function App() {
                             </button>
                           )}
                         </div>
-                        <div className="clinic-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                        <div className="clinic-actions" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                           <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'cold-call')}>
                             📞 Script
                           </button>
                           <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'email')}>
                             📧 Email
+                          </button>
+                          <button 
+                            className="btn btn-sm" 
+                            style={{ background: 'var(--danger)', color: 'white' }}
+                            onClick={() => {
+                              if (confirm(`Delete ${row.clinic_name}?`)) {
+                                setCurrentJob(prev => ({
+                                  ...prev,
+                                  results: prev.results.filter(c => c.clinic_id !== row.clinic_id)
+                                }));
+                              }
+                            }}
+                          >
+                            🗑️
                           </button>
                         </div>
                       </div>
