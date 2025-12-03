@@ -14,6 +14,7 @@ function App() {
   const [isScoring, setIsScoring] = useState(false);
   const [expandedRows, setExpandedRows] = useState({});
   const [enrichingClinic, setEnrichingClinic] = useState(null);
+  const [toasts, setToasts] = useState([]);
   
   // Lead management state (persisted)
   const [leadStatuses, setLeadStatuses] = useState(() => {
@@ -101,6 +102,30 @@ function App() {
     setHiddenLeads({});
   };
 
+  // Toast notification system
+  const showToast = (message, type = 'info') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3000);
+  };
+
+  // Delete a job from history
+  const handleDeleteJobFromHistory = async (jobId, e) => {
+    e.stopPropagation();
+    try {
+      await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      setJobs(prev => prev.filter(j => j.id !== jobId));
+      if (currentJob?.id === jobId) {
+        setCurrentJob(null);
+      }
+      showToast('Job deleted', 'success');
+    } catch (err) {
+      showToast('Failed to delete job', 'error');
+    }
+  };
+
   const deleteLeadPermanently = (clinicId) => {
     if (!currentJob) return;
     setCurrentJob(prev => ({
@@ -119,12 +144,13 @@ function App() {
 
   // Enrich clinic data (find email, check for AI)
   const enrichClinicData = async (clinic) => {
-    if (!clinic.website || clinic.website.includes('maps.google.com')) {
-      alert('No website available to scrape for this clinic');
+    if (!clinic.website && !clinic.address) {
+      showToast('No website or address to search', 'error');
       return;
     }
     
     setEnrichingClinic(clinic.clinic_id);
+    showToast(`Scraping data for ${clinic.clinic_name || clinic.name}...`, 'info');
     
     try {
       const res = await fetch('/api/ai/enrich-clinic', {
@@ -134,7 +160,9 @@ function App() {
       });
       const data = await res.json();
       
-      if (data.enrichedData) {
+      if (data.error) {
+        showToast(data.error, 'error');
+      } else if (data.enrichedData) {
         // Update the clinic in currentJob with enriched data
         setCurrentJob(prev => ({
           ...prev,
@@ -144,9 +172,16 @@ function App() {
               : c
           )
         }));
+        
+        if (data.enrichedData.email) {
+          showToast(`Found email: ${data.enrichedData.email}`, 'success');
+        } else {
+          showToast('Scraping complete - no email found', 'info');
+        }
       }
     } catch (err) {
       console.error('Failed to enrich clinic:', err);
+      showToast('Failed to scrape clinic data', 'error');
     } finally {
       setEnrichingClinic(null);
     }
@@ -594,18 +629,45 @@ function App() {
               <div 
                 key={job.id} 
                 className={`nav-item ${currentJob?.id === job.id ? 'active' : ''}`}
-                onClick={() => {
-                  handleLoadJob(job.id);
-                  setActiveTab('scraper');
-                }}
-                style={{ fontSize: '0.9rem' }}
+                style={{ fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
               >
-                <span style={{ opacity: 0.7 }}>📍</span> 
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {job.location}
-                </span>
+                <div 
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, overflow: 'hidden', cursor: 'pointer' }}
+                  onClick={() => {
+                    handleLoadJob(job.id);
+                    setActiveTab('scraper');
+                  }}
+                >
+                  <span style={{ opacity: 0.7 }}>📍</span> 
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {job.location}
+                  </span>
+                  <span style={{ fontSize: '0.7rem', opacity: 0.5 }}>({job.resultCount || 0})</span>
+                </div>
+                <button
+                  onClick={(e) => handleDeleteJobFromHistory(job.id, e)}
+                  style={{ 
+                    background: 'transparent', 
+                    border: 'none', 
+                    color: 'var(--text-tertiary)', 
+                    cursor: 'pointer',
+                    padding: '0.25rem',
+                    fontSize: '0.8rem',
+                    opacity: 0.6
+                  }}
+                  title="Delete this job"
+                  onMouseOver={(e) => e.target.style.opacity = 1}
+                  onMouseOut={(e) => e.target.style.opacity = 0.6}
+                >
+                  ✕
+                </button>
               </div>
             ))}
+            {jobs.length === 0 && (
+              <div style={{ padding: '0.5rem 1rem', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
+                No jobs yet
+              </div>
+            )}
           </div>
         </div>
 
@@ -747,98 +809,202 @@ function App() {
                     {currentJob.results
                       .filter(row => statusFilter === 'all' || (leadStatuses[row.clinic_id] || 'new') === statusFilter)
                       .map((row) => (
-                      <div key={row.clinic_id} className="data-card">
-                        <div className="clinic-avatar">
-                          {row.rating >= 4.5 ? '⭐' : '🦷'}
-                        </div>
-                        <div className="clinic-info">
-                          <h4>{row.clinic_name}</h4>
-                          <div className="clinic-meta">
-                            <span>{row.rating || '-'} ★ ({row.reviewCount || 0})</span>
-                            <span>•</span>
-                            <span>{row.address}</span>
+                      <div key={row.clinic_id} className="data-card-wrapper">
+                        <div className="data-card">
+                          {/* Expand Button */}
+                          <button 
+                            className="expand-btn"
+                            onClick={() => toggleRowExpand(row.clinic_id)}
+                            title={expandedRows[row.clinic_id] ? 'Collapse' : 'Expand details'}
+                          >
+                            {expandedRows[row.clinic_id] ? '▼' : '▶'}
+                          </button>
+                          
+                          <div className="clinic-avatar">
+                            {row.enriched ? '✅' : row.rating >= 4.5 ? '⭐' : '🦷'}
                           </div>
-                          {row.email && (
-                            <div style={{ fontSize: '0.85rem', color: 'var(--primary)', marginTop: '0.25rem' }}>
-                              📧 {row.email}
+                          
+                          <div className="clinic-info">
+                            <h4>{row.clinic_name || row.name}</h4>
+                            <div className="clinic-meta">
+                              <span>{row.rating || '-'} ★ ({row.reviewCount || 0})</span>
+                              <span>•</span>
+                              <span>{row.address}</span>
                             </div>
-                          )}
-                        </div>
-                        <div className="clinic-contact">
-                          <div style={{ fontSize: '0.9rem' }}>{row.phone || 'No phone'}</div>
-                          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
-                            {row.website && (
-                              <a 
-                                href={row.website.startsWith('http') ? row.website : `https://${row.website}`} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                style={{ fontSize: '0.8rem', color: 'var(--primary)' }}
-                              >
-                                🌐 Website
+                            {row.email && (
+                              <a href={`mailto:${row.email}`} style={{ fontSize: '0.85rem', color: 'var(--success)', marginTop: '0.25rem', display: 'block' }}>
+                                📧 {row.email}
                               </a>
                             )}
-                            {row.mapsUrl && (
+                          </div>
+                          
+                          <div className="clinic-contact">
+                            <div style={{ fontSize: '0.9rem' }}>
+                              {row.phone ? (
+                                <a href={`tel:${row.phone}`} style={{ color: 'var(--text-primary)' }}>{row.phone}</a>
+                              ) : 'No phone'}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+                              {/* Google Search for real website */}
                               <a 
-                                href={row.mapsUrl} 
+                                href={`https://www.google.com/search?q=${encodeURIComponent((row.clinic_name || row.name) + ' ' + row.address + ' dental')}`}
                                 target="_blank" 
                                 rel="noopener noreferrer" 
-                                style={{ fontSize: '0.8rem', color: 'var(--success)' }}
+                                style={{ fontSize: '0.75rem', color: 'var(--primary)' }}
+                                title="Search for real website on Google"
+                              >
+                                🔍 Google
+                              </a>
+                              {/* Google Maps link */}
+                              <a 
+                                href={`https://www.google.com/maps/search/${encodeURIComponent((row.clinic_name || row.name) + ' ' + row.address)}`}
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                style={{ fontSize: '0.75rem', color: 'var(--success)' }}
+                                title="Find on Google Maps"
                               >
                                 📍 Maps
                               </a>
+                            </div>
+                          </div>
+                          
+                          <div className="clinic-status">
+                            <select 
+                              className="form-control" 
+                              style={{ padding: '0.25rem', fontSize: '0.85rem' }}
+                              value={leadStatuses[row.clinic_id] || 'new'}
+                              onChange={(e) => updateLeadStatus(row.clinic_id, e.target.value)}
+                            >
+                              <option value="new">New</option>
+                              <option value="contacted">Contacted</option>
+                              <option value="interested">Interested</option>
+                              <option value="rejected">Rejected</option>
+                              <option value="won">Won</option>
+                            </select>
+                          </div>
+                          
+                          <div className="clinic-score">
+                            {row.leadScore ? (
+                              <div className="status-badge status-qualified">
+                                {row.leadScore.score}/100
+                              </div>
+                            ) : (
+                              <button 
+                                className="btn btn-sm btn-secondary"
+                                onClick={() => handleScoreLead(row)}
+                                title="AI Score this lead"
+                              >
+                                🎯
+                              </button>
                             )}
                           </div>
-                        </div>
-                        <div className="clinic-status">
-                          <select 
-                            className="form-control" 
-                            style={{ padding: '0.25rem', fontSize: '0.85rem' }}
-                            value={leadStatuses[row.clinic_id] || 'new'}
-                            onChange={(e) => updateLeadStatus(row.clinic_id, e.target.value)}
-                          >
-                            <option value="new">New</option>
-                            <option value="contacted">Contacted</option>
-                            <option value="interested">Interested</option>
-                            <option value="rejected">Rejected</option>
-                            <option value="won">Won</option>
-                          </select>
-                        </div>
-                        <div className="clinic-score">
-                          {row.leadScore ? (
-                            <div className="status-badge status-qualified">
-                              Score: {row.leadScore.score}
-                            </div>
-                          ) : (
+                          
+                          <div className="clinic-actions" style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                            {/* Scrape Email Button */}
                             <button 
-                              className="btn btn-sm btn-secondary"
-                              onClick={() => handleScoreLead(row)}
+                              className="btn btn-sm"
+                              style={{ background: row.enriched ? 'var(--success)' : 'var(--info)', color: 'white' }}
+                              onClick={() => enrichClinicData(row)}
+                              disabled={enrichingClinic === row.clinic_id}
+                              title="Scrape website for email & details"
                             >
-                              Score
+                              {enrichingClinic === row.clinic_id ? '⏳' : row.enriched ? '✓' : '🔎'}
                             </button>
-                          )}
+                            <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'cold-call')} title="Generate call script">
+                              📞
+                            </button>
+                            <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'email')} title="Generate email">
+                              📧
+                            </button>
+                            <button 
+                              className="btn btn-sm" 
+                              style={{ background: 'var(--danger)', color: 'white' }}
+                              onClick={() => {
+                                if (confirm(`Delete ${row.clinic_name || row.name}?`)) {
+                                  setCurrentJob(prev => ({
+                                    ...prev,
+                                    results: prev.results.filter(c => c.clinic_id !== row.clinic_id)
+                                  }));
+                                  showToast(`Deleted ${row.clinic_name || row.name}`, 'success');
+                                }
+                              }}
+                              title="Delete this lead"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         </div>
-                        <div className="clinic-actions" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'cold-call')}>
-                            📞 Script
-                          </button>
-                          <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'email')}>
-                            📧 Email
-                          </button>
-                          <button 
-                            className="btn btn-sm" 
-                            style={{ background: 'var(--danger)', color: 'white' }}
-                            onClick={() => {
-                              if (confirm(`Delete ${row.clinic_name}?`)) {
-                                setCurrentJob(prev => ({
-                                  ...prev,
-                                  results: prev.results.filter(c => c.clinic_id !== row.clinic_id)
-                                }));
-                              }
-                            }}
-                          >
-                            🗑️
-                          </button>
-                        </div>
+                        
+                        {/* Expanded Details Panel */}
+                        {expandedRows[row.clinic_id] && (
+                          <div className="expanded-details">
+                            <div className="details-grid">
+                              <div className="detail-section">
+                                <h5>📋 Basic Info</h5>
+                                <p><strong>Name:</strong> {row.clinic_name || row.name}</p>
+                                <p><strong>Address:</strong> {row.address}</p>
+                                <p><strong>Phone:</strong> {row.phone || 'Not found'}</p>
+                                <p><strong>Email:</strong> {row.email || <span style={{color: 'var(--warning)'}}>Not found - Click 🔎 to scrape</span>}</p>
+                                <p><strong>Hours:</strong> {row.hours || 'Not available'}</p>
+                              </div>
+                              
+                              <div className="detail-section">
+                                <h5>⭐ Ratings & Reviews</h5>
+                                <p><strong>Rating:</strong> {row.rating || '-'} / 5.0</p>
+                                <p><strong>Reviews:</strong> {row.reviewCount || 0}</p>
+                                <p><strong>Services:</strong> {row.services || 'General Dentistry'}</p>
+                                {row.leadScore && (
+                                  <>
+                                    <p><strong>AI Score:</strong> {row.leadScore.score}/100</p>
+                                    <p><strong>Priority:</strong> {row.leadScore.priority || 'Medium'}</p>
+                                  </>
+                                )}
+                              </div>
+                              
+                              {row.enriched && (
+                                <div className="detail-section">
+                                  <h5>🔍 Scraped Data</h5>
+                                  <p><strong>Has Chatbot:</strong> {row.has_chatbot ? `Yes (${row.chatbot_type || 'Unknown'})` : 'No'}</p>
+                                  <p><strong>Online Booking:</strong> {row.has_online_booking ? `Yes (${row.booking_system || 'Unknown'})` : 'No'}</p>
+                                  <p><strong>Tech Level:</strong> {row.competition_level || 'Unknown'}</p>
+                                  {row.emails_found?.length > 0 && (
+                                    <p><strong>Emails Found:</strong> {row.emails_found.join(', ')}</p>
+                                  )}
+                                </div>
+                              )}
+                              
+                              <div className="detail-section">
+                                <h5>📝 Notes</h5>
+                                <textarea
+                                  className="form-control"
+                                  placeholder="Add notes about this lead..."
+                                  value={leadNotes[row.clinic_id] || ''}
+                                  onChange={(e) => updateLeadNote(row.clinic_id, e.target.value)}
+                                  style={{ minHeight: '80px', fontSize: '0.85rem' }}
+                                />
+                              </div>
+                            </div>
+                            
+                            <div className="detail-actions">
+                              <button 
+                                className="btn btn-primary btn-sm"
+                                onClick={() => enrichClinicData(row)}
+                                disabled={enrichingClinic === row.clinic_id}
+                              >
+                                {enrichingClinic === row.clinic_id ? '⏳ Scraping...' : '🔎 Scrape for Email & AI Detection'}
+                              </button>
+                              <button className="btn btn-secondary btn-sm" onClick={() => handleAnalyzeFit(row)}>
+                                📊 AI Analyze Fit
+                              </button>
+                              <button className="btn btn-secondary btn-sm" onClick={() => handleGeneratePitch(row, 'linkedin')}>
+                                💼 LinkedIn Message
+                              </button>
+                              <button className="btn btn-secondary btn-sm" onClick={() => handleGeneratePitch(row, 'follow-up')}>
+                                ✍️ Follow-up Email
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -890,6 +1056,16 @@ function App() {
           )}
         </div>
       </main>
+      
+      {/* Toast Notifications */}
+      <div className="toast-container">
+        {toasts.map(toast => (
+          <div key={toast.id} className={`toast toast-${toast.type}`}>
+            <span>{toast.type === 'success' ? '✓' : toast.type === 'error' ? '✕' : 'ℹ'}</span>
+            {toast.message}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
