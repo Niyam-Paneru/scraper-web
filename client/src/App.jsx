@@ -10,11 +10,24 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('scraper');
   const [selectedClinic, setSelectedClinic] = useState(null);
-  const [showUsagePanel, setShowUsagePanel] = useState(false);
   const [isScoring, setIsScoring] = useState(false);
   const [expandedRows, setExpandedRows] = useState({});
   const [enrichingClinic, setEnrichingClinic] = useState(null);
   const [toasts, setToasts] = useState([]);
+  
+  // New AI features state
+  const [isScoringAll, setIsScoringAll] = useState(false);
+  const [isGeneratingCampaign, setIsGeneratingCampaign] = useState(false);
+  const [campaignEmails, setCampaignEmails] = useState([]);
+  const [leadScores, setLeadScores] = useState({});
+  const [selectedClinicsForCampaign, setSelectedClinicsForCampaign] = useState([]);
+  
+  // Theme state
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) return saved;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
   
   // Lead management state (persisted)
   const [leadStatuses, setLeadStatuses] = useState(() => {
@@ -40,16 +53,12 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [currentChatId, setCurrentChatId] = useState(null);
-  const [showChatSidebar, setShowChatSidebar] = useState(false);
-  const [showHiddenLeads, setShowHiddenLeads] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // Form state
+  // Form state - Google Places API for real data
   const [formData, setFormData] = useState({
-    source: 'gemini-maps',
     location: '',
-    max: 50,
-    enrich: false,
+    max: 20,
     webhookUrl: ''
   });
 
@@ -58,6 +67,17 @@ function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const chatEndRef = useRef(null);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Toggle theme
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
 
   // Persist lead management data
   useEffect(() => {
@@ -90,25 +110,13 @@ function App() {
     setLeadNotes(prev => ({ ...prev, [clinicId]: note }));
   };
 
-  const setFollowUp = (clinicId, date) => {
-    setFollowUps(prev => ({ ...prev, [clinicId]: date }));
-  };
-
-  const hideLeadFromList = (clinicId) => {
-    setHiddenLeads(prev => ({ ...prev, [clinicId]: true }));
-  };
-
-  const unhideAllLeads = () => {
-    setHiddenLeads({});
-  };
-
   // Toast notification system
   const showToast = (message, type = 'info') => {
     const id = Date.now();
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
+    }, 4000);
   };
 
   // Delete a job from history
@@ -126,31 +134,21 @@ function App() {
     }
   };
 
-  const deleteLeadPermanently = (clinicId) => {
-    if (!currentJob) return;
-    setCurrentJob(prev => ({
-      ...prev,
-      results: prev.results.filter(r => r.clinic_id !== clinicId),
-      stats: {
-        ...prev.stats,
-        total: prev.stats.total - 1
-      }
-    }));
-    // Clean up associated data
-    const newStatuses = { ...leadStatuses };
-    delete newStatuses[clinicId];
-    setLeadStatuses(newStatuses);
-  };
-
-  // Enrich clinic data (find email, check for AI)
+  // Enrich clinic data (find email, check for AI) - FIXED VERSION
   const enrichClinicData = async (clinic) => {
-    if (!clinic.website && !clinic.address) {
-      showToast('No website or address to search', 'error');
+    if (!clinic.website) {
+      showToast('No website available. Use Google search to find it first.', 'error');
+      return;
+    }
+    
+    // Skip Google Maps URLs
+    if (clinic.website.includes('maps.google.com') || clinic.website.includes('goo.gl')) {
+      showToast('Cannot scrape Google Maps links. Find the actual website.', 'error');
       return;
     }
     
     setEnrichingClinic(clinic.clinic_id);
-    showToast(`Scraping data for ${clinic.clinic_name || clinic.name}...`, 'info');
+    showToast(`🔍 Scraping ${clinic.clinic_name || clinic.name}...`, 'info');
     
     try {
       const res = await fetch('/api/ai/enrich-clinic', {
@@ -162,28 +160,149 @@ function App() {
       
       if (data.error) {
         showToast(data.error, 'error');
-      } else if (data.enrichedData) {
+        return;
+      }
+      
+      if (data.enrichedData) {
         // Update the clinic in currentJob with enriched data
         setCurrentJob(prev => ({
           ...prev,
           results: prev.results.map(c => 
             c.clinic_id === clinic.clinic_id 
-              ? { ...c, ...data.enrichedData, enriched: true }
+              ? { 
+                  ...c, 
+                  email: data.enrichedData.email || c.email,
+                  emails_found: data.enrichedData.emails_found || [],
+                  has_chatbot: data.enrichedData.has_chatbot,
+                  chatbot_type: data.enrichedData.chatbot_type,
+                  has_online_booking: data.enrichedData.has_online_booking,
+                  booking_system: data.enrichedData.booking_system,
+                  enriched: true,
+                  enriched_source: data.source || 'scraped'
+                }
               : c
           )
         }));
         
+        // Show appropriate toast based on results
         if (data.enrichedData.email) {
-          showToast(`Found email: ${data.enrichedData.email}`, 'success');
+          showToast(`✅ Found email: ${data.enrichedData.email}`, 'success');
+        } else if (data.enrichedData.emails_found?.length > 0) {
+          showToast(`Found ${data.enrichedData.emails_found.length} email(s)`, 'success');
         } else {
-          showToast('Scraping complete - no email found', 'info');
+          showToast('No email found on the website', 'warning');
+        }
+        
+        if (data.enrichedData.has_chatbot) {
+          showToast(`⚠️ Has chatbot: ${data.enrichedData.chatbot_type || 'Unknown'}`, 'info');
         }
       }
     } catch (err) {
       console.error('Failed to enrich clinic:', err);
-      showToast('Failed to scrape clinic data', 'error');
+      showToast('Failed to scrape website', 'error');
     } finally {
       setEnrichingClinic(null);
+    }
+  };
+
+  // Score all leads using HuggingFace AI
+  const scoreAllLeads = async () => {
+    if (!currentJob?.results?.length) {
+      showToast('No clinics to score', 'error');
+      return;
+    }
+    
+    setIsScoringAll(true);
+    showToast('🤖 Scoring all leads with AI...', 'info');
+    
+    try {
+      const res = await fetch('/api/ai/batch-score-leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinics: currentJob.results })
+      });
+      const data = await res.json();
+      
+      if (data.error) {
+        showToast(data.error, 'error');
+        return;
+      }
+      
+      // Update lead scores
+      const scores = {};
+      data.clinics.forEach(c => {
+        scores[c.clinic_id] = c.leadScore;
+      });
+      setLeadScores(scores);
+      
+      showToast(`✅ Scored ${data.summary.total} leads: ${data.summary.gradeA} A, ${data.summary.gradeB} B, ${data.summary.gradeC} C`, 'success');
+    } catch (err) {
+      showToast('Failed to score leads', 'error');
+    } finally {
+      setIsScoringAll(false);
+    }
+  };
+
+  // Generate email campaign using Gemini
+  const generateEmailCampaign = async () => {
+    const clinicsWithEmail = currentJob?.results?.filter(c => c.email) || [];
+    
+    if (clinicsWithEmail.length === 0) {
+      showToast('No clinics with emails. Scrape emails first!', 'error');
+      return;
+    }
+    
+    setIsGeneratingCampaign(true);
+    showToast('✍️ Generating personalized emails with AI...', 'info');
+    
+    try {
+      const res = await fetch('/api/ai/generate-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          clinics: clinicsWithEmail.slice(0, 10),
+          campaignType: 'introduction',
+          senderInfo: { name: 'Your Name', company: 'Your Company' }
+        })
+      });
+      const data = await res.json();
+      
+      if (data.error) {
+        showToast(data.error, 'error');
+        return;
+      }
+      
+      setCampaignEmails(data.emails);
+      showToast(`✅ Generated ${data.count} personalized emails!`, 'success');
+    } catch (err) {
+      showToast('Failed to generate emails', 'error');
+    } finally {
+      setIsGeneratingCampaign(false);
+    }
+  };
+
+  // Analyze competitor
+  const analyzeCompetitor = async (clinic) => {
+    showToast('🔍 Analyzing competitor...', 'info');
+    
+    try {
+      const res = await fetch('/api/ai/analyze-competitor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinic })
+      });
+      const data = await res.json();
+      
+      if (data.analysis) {
+        // Store in notes
+        setLeadNotes(prev => ({
+          ...prev,
+          [clinic.clinic_id]: JSON.stringify(data.analysis, null, 2)
+        }));
+        showToast('✅ Analysis complete! Check notes.', 'success');
+      }
+    } catch (err) {
+      showToast('Failed to analyze', 'error');
     }
   };
 
@@ -193,40 +312,6 @@ function App() {
       ...prev,
       [rowId]: !prev[rowId]
     }));
-  };
-
-  // Start new chat
-  const startNewChat = () => {
-    if (chatMessages.length > 0) {
-      // Save current chat
-      const newHistory = {
-        id: Date.now(),
-        title: chatMessages[0]?.content?.substring(0, 40) + '...' || 'New Chat',
-        messages: chatMessages,
-        timestamp: new Date().toISOString(),
-        clinic: selectedClinic?.clinic_name || null
-      };
-      setChatHistories(prev => [newHistory, ...prev].slice(0, 20)); // Keep last 20
-    }
-    setChatMessages([]);
-    setCurrentChatId(null);
-  };
-
-  // Load chat from history
-  const loadChat = (historyItem) => {
-    setChatMessages(historyItem.messages);
-    setCurrentChatId(historyItem.id);
-    setShowChatSidebar(false);
-  };
-
-  // Delete chat from history
-  const deleteChat = (id, e) => {
-    e.stopPropagation();
-    setChatHistories(prev => prev.filter(h => h.id !== id));
-    if (currentChatId === id) {
-      setChatMessages([]);
-      setCurrentChatId(null);
-    }
   };
 
   // Check server status and load usage
@@ -269,7 +354,10 @@ function App() {
 
   // Poll current job
   useEffect(() => {
-    if (!currentJob || currentJob.status !== 'running') return;
+    if (!currentJob || currentJob.status !== 'running') {
+      setIsLoading(false);
+      return;
+    }
 
     const interval = setInterval(() => {
       fetch(`/api/jobs/${currentJob.id}`)
@@ -277,7 +365,18 @@ function App() {
         .then(job => {
           setCurrentJob(job);
           if (job.status !== 'running') {
+            setIsLoading(false);
             loadJobs();
+            
+            if (job.status === 'failed') {
+              if (job.error?.includes('429') || job.error?.includes('rate') || job.error?.includes('limit')) {
+                showToast('⚠️ API rate limited! Try using "Google Maps" source instead.', 'error');
+              } else {
+                showToast(job.error || 'Scraping failed', 'error');
+              }
+            } else if (job.results?.length > 0) {
+              showToast(`Found ${job.results.length} clinics!`, 'success');
+            }
           }
         })
         .catch(console.error);
@@ -295,23 +394,63 @@ function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.location.trim()) return;
+    
+    if (!serverStatus?.hasGooglePlacesKey) {
+      showToast('Google Places API key required. See GOOGLE-PLACES-SETUP.md', 'error');
+      return;
+    }
 
     setIsLoading(true);
     try {
       const res = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          location: formData.location,
+          max: formData.max,
+          webhookUrl: formData.webhookUrl
+        })
       });
-      const { jobId } = await res.json();
+      const data = await res.json();
+      
+      if (data.error) {
+        showToast(data.error, 'error');
+        setIsLoading(false);
+        return;
+      }
+      
+      const { jobId } = data;
 
-      const jobRes = await fetch(`/api/jobs/${jobId}`);
-      const job = await jobRes.json();
-      setCurrentJob(job);
-      loadJobs();
+      // Poll for job completion
+      const pollJob = async () => {
+        const jobRes = await fetch(`/api/jobs/${jobId}`);
+        const job = await jobRes.json();
+        setCurrentJob(job);
+        
+        if (job.status === 'running') {
+          setTimeout(pollJob, 1000);
+        } else if (job.status === 'failed') {
+          // Check for specific errors
+          if (job.error?.includes('API key')) {
+            showToast('⚠️ Google Places API key error. Check your key in .env', 'error');
+          } else {
+            showToast(job.error || 'Scraping failed', 'error');
+          }
+          loadJobs();
+        } else {
+          loadJobs();
+          if (job.results?.length > 0) {
+            showToast(`✅ Found ${job.results.length} REAL clinics!`, 'success');
+          } else {
+            showToast('No clinics found. Try a different location.', 'warning');
+          }
+        }
+      };
+      
+      pollJob();
     } catch (err) {
       console.error('Failed to start scrape:', err);
-    } finally {
+      showToast('Failed to start scrape', 'error');
       setIsLoading(false);
     }
   };
@@ -327,13 +466,6 @@ function App() {
   const handleDownloadCSV = () => {
     if (!currentJob) return;
     window.open(`/api/jobs/${currentJob.id}/csv`, '_blank');
-  };
-
-  // Delete job
-  const handleDeleteJob = async (jobId) => {
-    await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-    if (currentJob?.id === jobId) setCurrentJob(null);
-    loadJobs();
   };
 
   // Send chat message
@@ -372,66 +504,6 @@ function App() {
     }
   };
 
-  // Generate email for clinic
-  const handleGenerateEmail = async (clinic, type = 'introduction') => {
-    setSelectedClinic(clinic);
-    setActiveTab('ai');
-    setChatMessages(prev => [...prev, { 
-      role: 'user', 
-      content: `Generate a ${type} email for ${clinic.clinic_name}` 
-    }]);
-    setIsChatLoading(true);
-
-    try {
-      const res = await fetch('/api/ai/generate-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinic, emailType: type })
-      });
-      const data = await res.json();
-
-      if (data.error) {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: data.error }]);
-      } else {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: data.email, isEmail: true }]);
-      }
-    } catch (err) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: err.message }]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
-  // Generate call script
-  const handleGenerateCallScript = async (clinic) => {
-    setSelectedClinic(clinic);
-    setActiveTab('ai');
-    setChatMessages(prev => [...prev, { 
-      role: 'user', 
-      content: `Generate a call script for ${clinic.clinic_name}` 
-    }]);
-    setIsChatLoading(true);
-
-    try {
-      const res = await fetch('/api/ai/generate-call-script', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinic })
-      });
-      const data = await res.json();
-
-      if (data.error) {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: data.error }]);
-      } else {
-        setChatMessages(prev => [...prev, { role: 'assistant', content: data.script, isScript: true }]);
-      }
-    } catch (err) {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: err.message }]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
   // Score a single lead
   const handleScoreLead = async (clinic) => {
     setSelectedClinic(clinic);
@@ -445,7 +517,6 @@ function App() {
       const data = await res.json();
 
       if (data.score) {
-        // Update the clinic in currentJob with the score
         setCurrentJob(prev => ({
           ...prev,
           results: prev.results.map(c => 
@@ -476,7 +547,6 @@ function App() {
       const data = await res.json();
 
       if (data.leads) {
-        // Update currentJob with scored leads, sorted by score
         setCurrentJob(prev => ({
           ...prev,
           results: data.leads
@@ -566,441 +636,465 @@ function App() {
     }
   };
 
-  // Quick actions
-  const quickActions = [
-    { label: '📧 Write intro email', action: () => setChatInput('Write an introduction email for the selected clinic') },
-    { label: '📞 Create call script', action: () => setChatInput('Create a call script for the AI voice agent') },
-    { label: '📊 Analyze my leads', action: () => setChatInput('Analyze the scraped clinics and tell me which ones to prioritize') },
-    { label: '✍️ Follow-up email', action: () => setChatInput('Write a follow-up email for the selected clinic') },
-  ];
-
-  // Get usage bar color based on percentage
-  const getUsageColor = (percent) => {
-    if (percent >= 90) return '#ef4444';
-    if (percent >= 75) return '#f97316';
-    if (percent >= 50) return '#eab308';
-    return '#22c55e';
-  };
-
   return (
-    <div className="app-container">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
+    <div className="app-layout">
+      {/* Header */}
+      <header className="header">
+        <div className="header-left">
           <div className="logo">
             <span className="logo-icon">🦷</span>
-            <span>DentalFinder</span>
+            <span className="logo-text">DentalFinder</span>
+            <span className="logo-badge">PRO</span>
           </div>
         </div>
-
-        <div className="sidebar-content">
-          <div className="sidebar-section">
-            <h3>Main</h3>
-            <div 
-              className={`nav-item ${activeTab === 'scraper' ? 'active' : ''}`}
-              onClick={() => setActiveTab('scraper')}
-            >
-              <span>🔍</span> Prospect Finder
-            </div>
-            <div 
-              className={`nav-item ${activeTab === 'ai' ? 'active' : ''}`}
-              onClick={() => setActiveTab('ai')}
-            >
-              <span>🤖</span> AI Assistant
-            </div>
-          </div>
-
-          <div className="sidebar-section">
-            <h3>Pipeline</h3>
-            <div className="nav-item" style={{ cursor: 'default' }}>
-              <span style={{ color: '#3b82f6' }}>●</span> New: {Object.values(leadStatuses).filter(s => s === 'new' || !s).length}
-            </div>
-            <div className="nav-item" style={{ cursor: 'default' }}>
-              <span style={{ color: '#f59e0b' }}>●</span> Contacted: {Object.values(leadStatuses).filter(s => s === 'contacted').length}
-            </div>
-            <div className="nav-item" style={{ cursor: 'default' }}>
-              <span style={{ color: '#10b981' }}>●</span> Interested: {Object.values(leadStatuses).filter(s => s === 'interested').length}
-            </div>
-          </div>
-
-          <div className="sidebar-section">
-            <h3>Recent Jobs</h3>
-            {jobs.slice(0, 5).map(job => (
-              <div 
-                key={job.id} 
-                className={`nav-item ${currentJob?.id === job.id ? 'active' : ''}`}
-                style={{ fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-              >
-                <div 
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, overflow: 'hidden', cursor: 'pointer' }}
-                  onClick={() => {
-                    handleLoadJob(job.id);
-                    setActiveTab('scraper');
-                  }}
-                >
-                  <span style={{ opacity: 0.7 }}>📍</span> 
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {job.location}
-                  </span>
-                  <span style={{ fontSize: '0.7rem', opacity: 0.5 }}>({job.resultCount || 0})</span>
-                </div>
-                <button
-                  onClick={(e) => handleDeleteJobFromHistory(job.id, e)}
-                  style={{ 
-                    background: 'transparent', 
-                    border: 'none', 
-                    color: 'var(--text-tertiary)', 
-                    cursor: 'pointer',
-                    padding: '0.25rem',
-                    fontSize: '0.8rem',
-                    opacity: 0.6
-                  }}
-                  title="Delete this job"
-                  onMouseOver={(e) => e.target.style.opacity = 1}
-                  onMouseOut={(e) => e.target.style.opacity = 0.6}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            {jobs.length === 0 && (
-              <div style={{ padding: '0.5rem 1rem', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
-                No jobs yet
-              </div>
+        
+        <nav className="header-nav">
+          <button 
+            className={`nav-btn ${activeTab === 'scraper' ? 'active' : ''}`}
+            onClick={() => setActiveTab('scraper')}
+          >
+            <span className="nav-icon">🔍</span>
+            <span>Find Clinics</span>
+          </button>
+          <button 
+            className={`nav-btn ${activeTab === 'ai' ? 'active' : ''}`}
+            onClick={() => setActiveTab('ai')}
+          >
+            <span className="nav-icon">🤖</span>
+            <span>AI Assistant</span>
+          </button>
+        </nav>
+        
+        <div className="header-right">
+          <div className="api-status">
+            {serverStatus?.hasGooglePlacesKey ? (
+              <span className="api-badge success">
+                <span className="status-dot online"></span>
+                Google Places Connected
+              </span>
+            ) : (
+              <span className="api-badge warning">
+                <span className="status-dot offline"></span>
+                API Key Required
+              </span>
             )}
           </div>
+          <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
         </div>
+      </header>
 
-        <div className="sidebar-footer">
-          {apiUsage && (
-            <div className="usage-mini">
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
-                <span>Gemini Usage</span>
-                <span>{apiUsage.geminiMaps.percentUsed}%</span>
+      <div className="main-layout">
+        {/* Sidebar */}
+        <aside className="sidebar">
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Pipeline</h3>
+            <div className="pipeline-stats">
+              <div className="stat-item">
+                <span className="stat-dot blue"></span>
+                <span className="stat-label">New</span>
+                <span className="stat-count">{currentJob?.results?.filter(r => !leadStatuses[r.clinic_id] || leadStatuses[r.clinic_id] === 'new').length || 0}</span>
               </div>
-              <div className="usage-bar">
+              <div className="stat-item">
+                <span className="stat-dot yellow"></span>
+                <span className="stat-label">Contacted</span>
+                <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'contacted').length || 0}</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-dot green"></span>
+                <span className="stat-label">Interested</span>
+                <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'interested').length || 0}</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-dot purple"></span>
+                <span className="stat-label">Won</span>
+                <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'won').length || 0}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="sidebar-section">
+            <h3 className="sidebar-title">Recent Searches</h3>
+            <div className="job-list">
+              {jobs.slice(0, 6).map(job => (
                 <div 
-                  className="usage-fill"
-                  style={{ 
-                    width: `${apiUsage.geminiMaps.percentUsed}%`,
-                    backgroundColor: getUsageColor(apiUsage.geminiMaps.percentUsed)
-                  }}
-                />
+                  key={job.id} 
+                  className={`job-item ${currentJob?.id === job.id ? 'active' : ''}`}
+                >
+                  <div 
+                    className="job-info"
+                    onClick={() => {
+                      handleLoadJob(job.id);
+                      setActiveTab('scraper');
+                    }}
+                  >
+                    <span className="job-location">{job.location}</span>
+                    <span className="job-count">{job.resultCount || 0} clinics</span>
+                  </div>
+                  <button
+                    className="job-delete"
+                    onClick={(e) => handleDeleteJobFromHistory(job.id, e)}
+                    title="Delete"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {jobs.length === 0 && (
+                <div className="empty-jobs">No searches yet</div>
+              )}
+            </div>
+          </div>
+
+          {apiUsage && (
+            <div className="sidebar-section usage-section">
+              <h3 className="sidebar-title">API Usage</h3>
+              <div className="usage-bar-container">
+                <div className="usage-bar">
+                  <div 
+                    className="usage-fill"
+                    style={{ 
+                      width: `${apiUsage.geminiMaps?.percentUsed || 0}%`,
+                    }}
+                  ></div>
+                </div>
+                <span className="usage-text">{apiUsage.geminiMaps?.remaining || 0} left</span>
               </div>
-              <small style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>
-                {apiUsage.geminiMaps.remaining} requests left
-              </small>
             </div>
           )}
-        </div>
-      </aside>
+        </aside>
 
-      {/* Main Content */}
-      <main className="main-content">
-        <div className="top-bar">
-          <div className="page-title">
-            {activeTab === 'scraper' ? 'Prospect Finder' : 'AI Assistant'}
-          </div>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: serverStatus?.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor' }}></div>
-              Server
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: aiStatus?.configured ? 'var(--success)' : 'var(--danger)' }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor' }}></div>
-              AI
-            </div>
-          </div>
-        </div>
-
-        <div className="content-scroll-area">
+        {/* Main Content */}
+        <main className="main-content">
           {activeTab === 'scraper' ? (
             <>
-              {/* Search Section */}
-              <div className="card">
-                <form onSubmit={handleSubmit} className="search-container">
-                  <div className="input-group">
-                    <label>Location</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. Miami, FL"
-                      value={formData.location}
-                      onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                      required
-                    />
+              {/* API Status Banner */}
+              {serverStatus && !serverStatus.hasGooglePlacesKey && (
+                <div className="setup-banner">
+                  <div className="setup-banner-content">
+                    <div className="setup-icon">🔑</div>
+                    <div className="setup-text">
+                      <h3>Setup Required: Google Places API Key</h3>
+                      <p>Add your API key to get <strong>real business data</strong> - names, phones, addresses, and websites.</p>
+                    </div>
+                    <div className="setup-actions">
+                      <a href="https://console.cloud.google.com/apis/library/places-backend.googleapis.com" target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+                        Get API Key →
+                      </a>
+                      <span className="setup-note">Free $200/month credit</span>
+                    </div>
                   </div>
-                  <div className="input-group">
-                    <label>Source</label>
-                    <select
-                      className="form-control"
-                      value={formData.source}
-                      onChange={(e) => setFormData({ ...formData, source: e.target.value })}
-                    >
-                      <option value="gemini-maps">Gemini Maps (Best)</option>
-                      <option value="googlemaps">Google Maps</option>
-                      <option value="yelp">Yelp</option>
-                    </select>
+                </div>
+              )}
+              
+              {/* Hero Search Section */}
+              <div className="hero-search">
+                <div className="hero-content">
+                  <h1 className="hero-title">Find Real Dental Clinics</h1>
+                  <p className="hero-subtitle">Powered by Google Places API • Real data, not fake generated content</p>
+                  
+                  <form onSubmit={handleSubmit} className="hero-form">
+                    <div className="search-input-group">
+                      <span className="search-icon">📍</span>
+                      <input
+                        type="text"
+                        className="search-input-large"
+                        placeholder="Enter city and state (e.g., Miami, FL)"
+                        value={formData.location}
+                        onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                        required
+                      />
+                      <div className="search-count">
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={formData.max}
+                          onChange={(e) => setFormData({ ...formData, max: parseInt(e.target.value) || 20 })}
+                          className="count-input"
+                        />
+                        <span className="count-label">results</span>
+                      </div>
+                      <button 
+                        type="submit" 
+                        className="btn btn-primary btn-large"
+                        disabled={isLoading || !formData.location.trim() || !serverStatus?.hasGooglePlacesKey}
+                      >
+                        {isLoading ? (
+                          <><span className="spinner"></span> Searching...</>
+                        ) : (
+                          <>🔍 Search</>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                  
+                  <div className="hero-badges">
+                    <span className="hero-badge">✓ Real Business Data</span>
+                    <span className="hero-badge">✓ Verified Phone Numbers</span>
+                    <span className="hero-badge">✓ Google Maps Accuracy</span>
                   </div>
-                  <div className="input-group">
-                    <label>Count</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      min="1"
-                      max="50"
-                      value={formData.max}
-                      onChange={(e) => setFormData({ ...formData, max: parseInt(e.target.value) || 50 })}
-                    />
-                  </div>
-                  <button 
-                    type="submit" 
-                    className="btn btn-primary"
-                    disabled={isLoading || !formData.location.trim()}
-                    style={{ marginBottom: '1rem', height: '46px' }}
-                  >
-                    {isLoading ? 'Searching...' : '🚀 Find Clinics'}
-                  </button>
-                </form>
+                </div>
               </div>
 
-              {/* Results Section */}
+              {/* Results */}
               {currentJob ? (
                 <div className="results-section">
                   <div className="results-header">
-                    <div>
-                      <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>{currentJob.location}</h2>
-                      <div className="results-count">
-                        Found {currentJob.results.length} clinics • {currentJob.status}
-                      </div>
+                    <div className="results-info">
+                      <h2>📍 {currentJob.location}</h2>
+                      <p className="results-count">
+                        <span className="count-number">{currentJob.results?.length || 0}</span> dental clinics found
+                        <span className="results-source">via Google Places</span>
+                      </p>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button className="btn btn-secondary btn-sm" onClick={handleDownloadCSV}>
+                    <div className="results-actions">
+                      <button className="btn btn-outline" onClick={handleDownloadCSV}>
                         📥 Export CSV
                       </button>
-                      {aiStatus?.configured && (
-                        <button 
-                          className="btn btn-primary btn-sm"
-                          onClick={handleScoreAllLeads}
-                          disabled={isScoring}
-                        >
-                          {isScoring ? '⏳ Scoring...' : '🎯 Score Leads'}
-                        </button>
-                      )}
+                      <button 
+                        className="btn btn-secondary"
+                        onClick={scoreAllLeads}
+                        disabled={isScoringAll}
+                        title="Score all leads using AI"
+                      >
+                        {isScoringAll ? '⏳ Scoring...' : '🎯 Score Leads'}
+                      </button>
+                      <button 
+                        className="btn btn-primary"
+                        onClick={generateEmailCampaign}
+                        disabled={isGeneratingCampaign || !currentJob?.results?.some(c => c.email)}
+                        title="Generate personalized emails"
+                      >
+                        {isGeneratingCampaign ? '⏳ Generating...' : '✉️ Generate Emails'}
+                      </button>
                     </div>
                   </div>
 
-                  {/* Filter Bar */}
-                  <div className="filter-bar" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
-                    {['all', 'new', 'contacted', 'interested', 'rejected'].map(filter => (
+                  {/* Campaign Emails Modal */}
+                  {campaignEmails.length > 0 && (
+                    <div className="campaign-panel">
+                      <div className="campaign-header">
+                        <h3>📧 Generated Email Campaign ({campaignEmails.length} emails)</h3>
+                        <button className="btn btn-sm" onClick={() => setCampaignEmails([])}>✕ Close</button>
+                      </div>
+                      <div className="campaign-emails">
+                        {campaignEmails.map((email, idx) => (
+                          <div key={idx} className="campaign-email-card">
+                            <div className="email-to">To: {email.clinic} ({email.clinicEmail})</div>
+                            <div className="email-subject"><strong>Subject:</strong> {email.subject}</div>
+                            <div className="email-body">{email.body}</div>
+                            <div className="email-actions">
+                              <button 
+                                className="btn btn-sm btn-primary"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`Subject: ${email.subject}\n\n${email.body}`);
+                                  showToast('Copied to clipboard!', 'success');
+                                }}
+                              >
+                                📋 Copy
+                              </button>
+                              <a 
+                                href={`mailto:${email.clinicEmail}?subject=${encodeURIComponent(email.subject)}&body=${encodeURIComponent(email.body)}`}
+                                className="btn btn-sm btn-success"
+                              >
+                                📤 Open in Email
+                              </a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Filter Pills */}
+                  <div className="filter-pills">
+                    {['all', 'new', 'contacted', 'interested', 'rejected', 'won'].map(filter => (
                       <button 
                         key={filter}
-                        className={`btn btn-sm ${statusFilter === filter ? 'btn-primary' : 'btn-secondary'}`}
+                        className={`pill ${statusFilter === filter ? 'active' : ''}`}
                         onClick={() => setStatusFilter(filter)}
-                        style={{ textTransform: 'capitalize' }}
                       >
-                        {filter}
+                        {filter.charAt(0).toUpperCase() + filter.slice(1)}
                       </button>
                     ))}
                   </div>
 
-                  {/* Data Grid */}
-                  <div className="data-grid">
+                  {/* Clinic Cards */}
+                  <div className="clinic-grid">
                     {currentJob.results
-                      .filter(row => statusFilter === 'all' || (leadStatuses[row.clinic_id] || 'new') === statusFilter)
-                      .map((row) => (
-                      <div key={row.clinic_id} className="data-card-wrapper">
-                        <div className="data-card">
-                          {/* Expand Button */}
-                          <button 
-                            className="expand-btn"
-                            onClick={() => toggleRowExpand(row.clinic_id)}
-                            title={expandedRows[row.clinic_id] ? 'Collapse' : 'Expand details'}
-                          >
-                            {expandedRows[row.clinic_id] ? '▼' : '▶'}
-                          </button>
-                          
-                          <div className="clinic-avatar">
-                            {row.enriched ? '✅' : row.rating >= 4.5 ? '⭐' : '🦷'}
-                          </div>
-                          
-                          <div className="clinic-info">
-                            <h4>{row.clinic_name || row.name}</h4>
-                            <div className="clinic-meta">
-                              <span>{row.rating || '-'} ★ ({row.reviewCount || 0})</span>
-                              <span>•</span>
-                              <span>{row.address}</span>
+                      ?.filter(row => statusFilter === 'all' || (leadStatuses[row.clinic_id] || 'new') === statusFilter)
+                      .map((clinic) => (
+                      <div key={clinic.clinic_id} className={`clinic-card ${expandedRows[clinic.clinic_id] ? 'expanded' : ''}`}>
+                        <div className="clinic-card-main" onClick={() => toggleRowExpand(clinic.clinic_id)}>
+                          <div className="clinic-header">
+                            <div className="clinic-avatar">
+                              {clinic.enriched ? '✓' : clinic.rating >= 4.5 ? '⭐' : '🦷'}
                             </div>
-                            {row.email && (
-                              <a href={`mailto:${row.email}`} style={{ fontSize: '0.85rem', color: 'var(--success)', marginTop: '0.25rem', display: 'block' }}>
-                                📧 {row.email}
-                              </a>
-                            )}
-                          </div>
-                          
-                          <div className="clinic-contact">
-                            <div style={{ fontSize: '0.9rem' }}>
-                              {row.phone ? (
-                                <a href={`tel:${row.phone}`} style={{ color: 'var(--text-primary)' }}>{row.phone}</a>
-                              ) : 'No phone'}
-                            </div>
-                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-                              {/* Google Search for real website */}
-                              <a 
-                                href={`https://www.google.com/search?q=${encodeURIComponent((row.clinic_name || row.name) + ' ' + row.address + ' dental')}`}
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                style={{ fontSize: '0.75rem', color: 'var(--primary)' }}
-                                title="Search for real website on Google"
-                              >
-                                🔍 Google
-                              </a>
-                              {/* Google Maps link */}
-                              <a 
-                                href={`https://www.google.com/maps/search/${encodeURIComponent((row.clinic_name || row.name) + ' ' + row.address)}`}
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                style={{ fontSize: '0.75rem', color: 'var(--success)' }}
-                                title="Find on Google Maps"
-                              >
-                                📍 Maps
-                              </a>
-                            </div>
-                          </div>
-                          
-                          <div className="clinic-status">
-                            <select 
-                              className="form-control" 
-                              style={{ padding: '0.25rem', fontSize: '0.85rem' }}
-                              value={leadStatuses[row.clinic_id] || 'new'}
-                              onChange={(e) => updateLeadStatus(row.clinic_id, e.target.value)}
-                            >
-                              <option value="new">New</option>
-                              <option value="contacted">Contacted</option>
-                              <option value="interested">Interested</option>
-                              <option value="rejected">Rejected</option>
-                              <option value="won">Won</option>
-                            </select>
-                          </div>
-                          
-                          <div className="clinic-score">
-                            {row.leadScore ? (
-                              <div className="status-badge status-qualified">
-                                {row.leadScore.score}/100
+                            <div className="clinic-title">
+                              <h3>{clinic.clinic_name || clinic.name}</h3>
+                              <div className="clinic-rating">
+                                <span className="stars">{'★'.repeat(Math.floor(clinic.rating || 0))}{'☆'.repeat(5 - Math.floor(clinic.rating || 0))}</span>
+                                <span className="review-count">({clinic.reviewCount || 0})</span>
                               </div>
-                            ) : (
-                              <button 
-                                className="btn btn-sm btn-secondary"
-                                onClick={() => handleScoreLead(row)}
-                                title="AI Score this lead"
-                              >
-                                🎯
-                              </button>
-                            )}
+                            </div>
+                            <div className="clinic-score">
+                              {leadScores[clinic.clinic_id] ? (
+                                <div className={`score-badge grade-${leadScores[clinic.clinic_id].grade}`}>
+                                  {leadScores[clinic.clinic_id].grade}
+                                </div>
+                              ) : clinic.leadScore ? (
+                                <div className="score-badge">{clinic.leadScore.score}</div>
+                              ) : null}
+                            </div>
                           </div>
                           
-                          <div className="clinic-actions" style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
-                            {/* Scrape Email Button */}
-                            <button 
-                              className="btn btn-sm"
-                              style={{ background: row.enriched ? 'var(--success)' : 'var(--info)', color: 'white' }}
-                              onClick={() => enrichClinicData(row)}
-                              disabled={enrichingClinic === row.clinic_id}
-                              title="Scrape website for email & details"
+                          <div className="clinic-details">
+                            <div className="detail-row">
+                              <span className="detail-icon">📍</span>
+                              <span className="detail-text">{clinic.address}</span>
+                            </div>
+                            {clinic.phone && (
+                              <div className="detail-row">
+                                <span className="detail-icon">📞</span>
+                                <a href={`tel:${clinic.phone}`} className="detail-link" onClick={e => e.stopPropagation()}>{clinic.phone}</a>
+                              </div>
+                            )}
+                            <div className="detail-row">
+                              <span className="detail-icon">📧</span>
+                              {clinic.email ? (
+                                <a href={`mailto:${clinic.email}`} className="detail-link email-found" onClick={e => e.stopPropagation()}>
+                                  {clinic.email}
+                                  {clinic.enriched_source === 'real-scrape' && <span className="verified-badge">✓ Verified</span>}
+                                </a>
+                              ) : (
+                                <span className="detail-text muted">
+                                  No email
+                                  <button 
+                                    className="scrape-btn-inline"
+                                    onClick={(e) => { e.stopPropagation(); enrichClinicData(clinic); }}
+                                    disabled={enrichingClinic === clinic.clinic_id}
+                                  >
+                                    {enrichingClinic === clinic.clinic_id ? '⏳' : '🔍 Scrape'}
+                                  </button>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="clinic-footer">
+                            <select 
+                              className="status-select"
+                              value={leadStatuses[clinic.clinic_id] || 'new'}
+                              onChange={(e) => { e.stopPropagation(); updateLeadStatus(clinic.clinic_id, e.target.value); }}
+                              onClick={e => e.stopPropagation()}
                             >
-                              {enrichingClinic === row.clinic_id ? '⏳' : row.enriched ? '✓' : '🔎'}
-                            </button>
-                            <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'cold-call')} title="Generate call script">
-                              📞
-                            </button>
-                            <button className="btn btn-sm btn-secondary" onClick={() => handleGeneratePitch(row, 'email')} title="Generate email">
-                              📧
-                            </button>
-                            <button 
-                              className="btn btn-sm" 
-                              style={{ background: 'var(--danger)', color: 'white' }}
-                              onClick={() => {
-                                if (confirm(`Delete ${row.clinic_name || row.name}?`)) {
-                                  setCurrentJob(prev => ({
-                                    ...prev,
-                                    results: prev.results.filter(c => c.clinic_id !== row.clinic_id)
-                                  }));
-                                  showToast(`Deleted ${row.clinic_name || row.name}`, 'success');
-                                }
-                              }}
-                              title="Delete this lead"
-                            >
-                              🗑️
-                            </button>
+                              <option value="new">🔵 New</option>
+                              <option value="contacted">🟡 Contacted</option>
+                              <option value="interested">🟢 Interested</option>
+                              <option value="rejected">🔴 Rejected</option>
+                              <option value="won">🟣 Won</option>
+                            </select>
+                            <div className="quick-actions">
+                              <a 
+                                href={`https://www.google.com/search?q=${encodeURIComponent((clinic.clinic_name || clinic.name) + ' ' + clinic.address + ' dental')}`}
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="action-btn"
+                                onClick={e => e.stopPropagation()}
+                                title="Search on Google"
+                              >
+                                🔍
+                              </a>
+                              <a 
+                                href={`https://www.google.com/maps/search/${encodeURIComponent((clinic.clinic_name || clinic.name) + ' ' + clinic.address)}`}
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="action-btn"
+                                onClick={e => e.stopPropagation()}
+                                title="View on Maps"
+                              >
+                                📍
+                              </a>
+                              <button 
+                                className="action-btn expand-indicator"
+                                onClick={(e) => { e.stopPropagation(); toggleRowExpand(clinic.clinic_id); }}
+                              >
+                                {expandedRows[clinic.clinic_id] ? '▲' : '▼'}
+                              </button>
+                            </div>
                           </div>
                         </div>
-                        
-                        {/* Expanded Details Panel */}
-                        {expandedRows[row.clinic_id] && (
-                          <div className="expanded-details">
-                            <div className="details-grid">
-                              <div className="detail-section">
-                                <h5>📋 Basic Info</h5>
-                                <p><strong>Name:</strong> {row.clinic_name || row.name}</p>
-                                <p><strong>Address:</strong> {row.address}</p>
-                                <p><strong>Phone:</strong> {row.phone || 'Not found'}</p>
-                                <p><strong>Email:</strong> {row.email || <span style={{color: 'var(--warning)'}}>Not found - Click 🔎 to scrape</span>}</p>
-                                <p><strong>Hours:</strong> {row.hours || 'Not available'}</p>
+
+                        {/* Expanded Panel */}
+                        {expandedRows[clinic.clinic_id] && (
+                          <div className="clinic-expanded">
+                            <div className="expanded-grid">
+                              <div className="expanded-section">
+                                <h4>📋 Contact Info</h4>
+                                <p><strong>Phone:</strong> {clinic.phone || 'Not found'}</p>
+                                <p><strong>Website:</strong> {clinic.website ? (
+                                  <a href={clinic.website.startsWith('http') ? clinic.website : `https://${clinic.website}`} target="_blank" rel="noopener noreferrer">{clinic.website}</a>
+                                ) : 'Not found'}</p>
+                                <p><strong>Hours:</strong> {clinic.hours || 'Not available'}</p>
                               </div>
                               
-                              <div className="detail-section">
-                                <h5>⭐ Ratings & Reviews</h5>
-                                <p><strong>Rating:</strong> {row.rating || '-'} / 5.0</p>
-                                <p><strong>Reviews:</strong> {row.reviewCount || 0}</p>
-                                <p><strong>Services:</strong> {row.services || 'General Dentistry'}</p>
-                                {row.leadScore && (
-                                  <>
-                                    <p><strong>AI Score:</strong> {row.leadScore.score}/100</p>
-                                    <p><strong>Priority:</strong> {row.leadScore.priority || 'Medium'}</p>
-                                  </>
-                                )}
-                              </div>
-                              
-                              {row.enriched && (
-                                <div className="detail-section">
-                                  <h5>🔍 Scraped Data</h5>
-                                  <p><strong>Has Chatbot:</strong> {row.has_chatbot ? `Yes (${row.chatbot_type || 'Unknown'})` : 'No'}</p>
-                                  <p><strong>Online Booking:</strong> {row.has_online_booking ? `Yes (${row.booking_system || 'Unknown'})` : 'No'}</p>
-                                  <p><strong>Tech Level:</strong> {row.competition_level || 'Unknown'}</p>
-                                  {row.emails_found?.length > 0 && (
-                                    <p><strong>Emails Found:</strong> {row.emails_found.join(', ')}</p>
+                              {clinic.enriched && (
+                                <div className="expanded-section">
+                                  <h4>🔍 Scraped Data</h4>
+                                  <p><strong>Email:</strong> {clinic.email || 'Not found on website'}</p>
+                                  {clinic.emails_found?.length > 1 && (
+                                    <p><strong>All Emails:</strong> {clinic.emails_found.join(', ')}</p>
                                   )}
+                                  <p><strong>Has Chatbot:</strong> {clinic.has_chatbot ? `Yes (${clinic.chatbot_type || 'Unknown'})` : 'No'}</p>
+                                  <p><strong>Online Booking:</strong> {clinic.has_online_booking ? `Yes (${clinic.booking_system || 'Unknown'})` : 'No'}</p>
                                 </div>
                               )}
                               
-                              <div className="detail-section">
-                                <h5>📝 Notes</h5>
+                              <div className="expanded-section">
+                                <h4>📝 Notes</h4>
                                 <textarea
-                                  className="form-control"
+                                  className="notes-input"
                                   placeholder="Add notes about this lead..."
-                                  value={leadNotes[row.clinic_id] || ''}
-                                  onChange={(e) => updateLeadNote(row.clinic_id, e.target.value)}
-                                  style={{ minHeight: '80px', fontSize: '0.85rem' }}
+                                  value={leadNotes[clinic.clinic_id] || ''}
+                                  onChange={(e) => updateLeadNote(clinic.clinic_id, e.target.value)}
+                                  onClick={e => e.stopPropagation()}
                                 />
                               </div>
                             </div>
                             
-                            <div className="detail-actions">
+                            <div className="expanded-actions">
                               <button 
                                 className="btn btn-primary btn-sm"
-                                onClick={() => enrichClinicData(row)}
-                                disabled={enrichingClinic === row.clinic_id}
+                                onClick={(e) => { e.stopPropagation(); enrichClinicData(clinic); }}
+                                disabled={enrichingClinic === clinic.clinic_id}
                               >
-                                {enrichingClinic === row.clinic_id ? '⏳ Scraping...' : '🔎 Scrape for Email & AI Detection'}
+                                {enrichingClinic === clinic.clinic_id ? '⏳ Scraping...' : '🔍 Scrape Website'}
                               </button>
-                              <button className="btn btn-secondary btn-sm" onClick={() => handleAnalyzeFit(row)}>
-                                📊 AI Analyze Fit
+                              <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); handleGeneratePitch(clinic, 'email'); }}>
+                                📧 Email Pitch
                               </button>
-                              <button className="btn btn-secondary btn-sm" onClick={() => handleGeneratePitch(row, 'linkedin')}>
-                                💼 LinkedIn Message
+                              <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); handleGeneratePitch(clinic, 'cold-call'); }}>
+                                📞 Call Script
                               </button>
-                              <button className="btn btn-secondary btn-sm" onClick={() => handleGeneratePitch(row, 'follow-up')}>
-                                ✍️ Follow-up Email
+                              <button className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); handleAnalyzeFit(clinic); }}>
+                                📊 AI Analysis
+                              </button>
+                              <button 
+                                className="btn btn-danger btn-sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (confirm(`Delete ${clinic.clinic_name || clinic.name}?`)) {
+                                    setCurrentJob(prev => ({
+                                      ...prev,
+                                      results: prev.results.filter(c => c.clinic_id !== clinic.clinic_id)
+                                    }));
+                                    showToast('Lead deleted', 'success');
+                                  }
+                                }}
+                              >
+                                🗑️ Delete
                               </button>
                             </div>
                           </div>
@@ -1010,59 +1104,96 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div className="empty-state" style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-secondary)' }}>
-                  <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🦷</div>
-                  <h3>Ready to find dental clinics?</h3>
-                  <p>Enter a location above to start prospecting.</p>
+                <div className="empty-state">
+                  <div className="empty-illustration">
+                    <span className="empty-icon-large">🦷</span>
+                    <div className="empty-circles">
+                      <span></span><span></span><span></span>
+                    </div>
+                  </div>
+                  <h2>Ready to Find Leads</h2>
+                  <p>Enter a city and state above to discover dental practices with real, verified contact information.</p>
+                  <div className="empty-features">
+                    <div className="feature-item">
+                      <span className="feature-icon">📞</span>
+                      <span>Real phone numbers</span>
+                    </div>
+                    <div className="feature-item">
+                      <span className="feature-icon">🌐</span>
+                      <span>Website URLs</span>
+                    </div>
+                    <div className="feature-item">
+                      <span className="feature-icon">⭐</span>
+                      <span>Google ratings</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </>
           ) : (
-            /* AI Chat Interface */
-            <div className="chat-container" style={{ height: 'calc(100vh - 140px)' }}>
-              <div className="chat-messages">
-                {chatMessages.length === 0 && (
-                  <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
-                    <h3>🤖 AI Assistant</h3>
-                    <p>I can help you write emails, scripts, and analyze leads.</p>
-                  </div>
-                )}
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`message ${msg.role}`}>
-                    {msg.content}
-                  </div>
-                ))}
-                {isChatLoading && (
-                  <div className="message assistant">
-                    <div className="spinner"></div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
+            /* AI Chat Tab */
+            <div className="chat-section">
+              <div className="chat-container">
+                <div className="chat-messages">
+                  {chatMessages.length === 0 && (
+                    <div className="chat-empty">
+                      <div className="chat-empty-icon">🤖</div>
+                      <h3>AI Sales Assistant</h3>
+                      <p>I can help you write emails, create call scripts, and analyze leads for your AI voice agent sales.</p>
+                      <div className="quick-prompts">
+                        <button onClick={() => setChatInput('Write an introduction email for a dental clinic')}>
+                          📧 Intro Email
+                        </button>
+                        <button onClick={() => setChatInput('Create a cold call script for AI voice agent sales')}>
+                          📞 Call Script
+                        </button>
+                        <button onClick={() => setChatInput('Analyze my leads and suggest which to contact first')}>
+                          📊 Analyze Leads
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`chat-message ${msg.role}`}>
+                      <div className="message-content">{msg.content}</div>
+                    </div>
+                  ))}
+                  {isChatLoading && (
+                    <div className="chat-message assistant">
+                      <div className="message-content typing">
+                        <span></span><span></span><span></span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+                <form className="chat-input-form" onSubmit={handleSendMessage}>
+                  <input
+                    type="text"
+                    className="chat-input"
+                    placeholder="Ask me anything about your leads..."
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    disabled={isChatLoading}
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={isChatLoading || !chatInput.trim()}>
+                    Send
+                  </button>
+                </form>
               </div>
-              <form className="chat-input-area" onSubmit={handleSendMessage}>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Type a message..."
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  disabled={isChatLoading}
-                />
-                <button type="submit" className="btn btn-primary" disabled={isChatLoading}>
-                  Send
-                </button>
-              </form>
             </div>
           )}
-        </div>
-      </main>
-      
+        </main>
+      </div>
+
       {/* Toast Notifications */}
       <div className="toast-container">
         {toasts.map(toast => (
           <div key={toast.id} className={`toast toast-${toast.type}`}>
-            <span>{toast.type === 'success' ? '✓' : toast.type === 'error' ? '✕' : 'ℹ'}</span>
-            {toast.message}
+            <span className="toast-icon">
+              {toast.type === 'success' ? '✓' : toast.type === 'error' ? '✕' : toast.type === 'warning' ? '⚠' : 'ℹ'}
+            </span>
+            <span className="toast-message">{toast.message}</span>
           </div>
         ))}
       </div>

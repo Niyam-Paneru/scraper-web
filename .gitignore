@@ -44,6 +44,10 @@ coverage/
 # Scraper outputs
 dental_prospects_*.csv
 
+# Documentation (keep local, don't push)
+*.md
+!README.md
+
 # Misc
 *.pem
 .cache

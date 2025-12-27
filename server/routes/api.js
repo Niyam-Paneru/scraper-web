@@ -1,17 +1,12 @@
 /**
  * API Routes for Dental Scraper
+ * Simplified to use only Google Places API (real data)
  */
 
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { scrapeYelp } from '../../scripts/sources/yelp.js';
-import { scrapeYellowPages } from '../../scripts/sources/yellowpages.js';
 import { scrapeGooglePlaces } from '../../scripts/sources/places.js';
-import { scrapeGoogleMaps } from '../../scripts/sources/googlemaps.js';
-import { scrapeGeminiMaps } from '../../scripts/sources/gemini-maps.js';
-import { closeBrowser } from '../../scripts/lib/visitAndExtract.js';
 import Logger from '../../scripts/lib/logger.js';
-import usageTracker from '../services/apiUsageTracker.js';
 
 const router = express.Router();
 
@@ -23,25 +18,37 @@ const jobs = new Map();
  * Check server status and configuration
  */
 router.get('/status', (req, res) => {
+  const hasGooglePlacesKey = !!process.env.GOOGLE_PLACES_KEY;
+  
   res.json({
     status: 'ok',
-    hasGooglePlacesKey: !!process.env.GOOGLE_PLACES_KEY,
+    hasGooglePlacesKey,
     hasGeminiKey: !!process.env.GEMINI_API_KEY,
-    availableSources: ['gemini-maps', 'googlemaps', 'yelp', 'yellowpages', 'places'],
-    recommendedSource: process.env.GEMINI_API_KEY ? 'gemini-maps' : 'googlemaps',
+    availableSources: hasGooglePlacesKey ? ['places'] : [],
+    configured: hasGooglePlacesKey,
+    message: hasGooglePlacesKey 
+      ? 'Google Places API configured - ready to scrape real data' 
+      : 'Google Places API key required. See GOOGLE-PLACES-SETUP.md',
     timestamp: new Date().toISOString()
   });
 });
 
 /**
  * POST /api/scrape
- * Start a new scraping job
+ * Start a new scraping job (Google Places only)
  */
 router.post('/scrape', async (req, res) => {
-  const { source = 'yelp', location, max = 50, delay = 1500, enrich = false, webhookUrl } = req.body;
+  const { location, max = 50, delay = 200, webhookUrl } = req.body;
 
   if (!location) {
     return res.status(400).json({ error: 'Location is required' });
+  }
+
+  if (!process.env.GOOGLE_PLACES_KEY) {
+    return res.status(400).json({ 
+      error: 'Google Places API key not configured',
+      help: 'Add GOOGLE_PLACES_KEY to your .env file. See GOOGLE-PLACES-SETUP.md for instructions.'
+    });
   }
 
   // Create job
@@ -49,7 +56,7 @@ router.post('/scrape', async (req, res) => {
   const job = {
     id: jobId,
     status: 'running',
-    source,
+    source: 'google-places',
     location,
     max,
     createdAt: new Date().toISOString(),
@@ -58,7 +65,7 @@ router.post('/scrape', async (req, res) => {
       total: 0,
       validPhones: 0,
       invalidPhones: 0,
-      withEmail: 0
+      withWebsite: 0
     },
     error: null
   };
@@ -66,10 +73,10 @@ router.post('/scrape', async (req, res) => {
   jobs.set(jobId, job);
 
   // Return immediately with job ID
-  res.json({ jobId, message: 'Scraping started' });
+  res.json({ jobId, message: 'Scraping started with Google Places API (real data)' });
 
   // Run scraper in background
-  runScraper(jobId, { source, location, max, delay, enrich, webhookUrl });
+  runScraper(jobId, { location, max, delay, webhookUrl });
 });
 
 /**
@@ -163,7 +170,7 @@ router.delete('/jobs/:id', (req, res) => {
 });
 
 /**
- * Run the scraper for a job
+ * Run the Google Places scraper for a job
  */
 async function runScraper(jobId, options) {
   const job = jobs.get(jobId);
@@ -173,77 +180,15 @@ async function runScraper(jobId, options) {
   let clinicId = 0;
 
   try {
-    // Check for Gemini Maps (preferred, no browser needed)
-    if (options.source === 'gemini-maps') {
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error('GEMINI_API_KEY not configured. Get one free at https://aistudio.google.com/apikey');
-      }
-      
-      // Check rate limits before making request
-      const limits = usageTracker.checkLimits();
-      if (limits.geminiMaps.dailyLimitReached) {
-        throw new Error('Gemini Maps daily limit (500 requests) reached. Try another source or switch API key.');
-      }
-      
-      // Parse city and state from location
-      const [city, state] = options.location.split(',').map(s => s.trim());
-      
-      try {
-        const results = await scrapeGeminiMaps(city, state, options.max, (progress) => {
-          if (progress.clinic) {
-            clinicId++;
-            const result = { clinic_id: clinicId, clinic_name: progress.clinic.name, ...progress.clinic };
-            job.results.push(result);
-            job.stats.total = clinicId;
-            
-            if (progress.clinic.phone_e164?.isValid || progress.clinic.phone) job.stats.validPhones++;
-            else job.stats.invalidPhones++;
-            if (progress.clinic.email) job.stats.withEmail++;
-          }
-        });
-        
-        // Track successful request
-        usageTracker.trackGeminiMapsRequest(true);
-        job.status = 'completed';
-        job.usage = usageTracker.getStatus();
-      } catch (err) {
-        usageTracker.trackGeminiMapsRequest(false);
-        throw err;
-      }
-      
-      return;
-    }
-
-    // Legacy scrapers using browser automation
-    let scraper;
     const scraperOptions = {
       location: options.location,
       max: options.max,
       delay: options.delay,
-      enrich: options.enrich,
       googlePlacesKey: process.env.GOOGLE_PLACES_KEY
     };
 
-    switch (options.source) {
-      case 'places':
-        if (!process.env.GOOGLE_PLACES_KEY) {
-          throw new Error('Google Places API key not configured. Set GOOGLE_PLACES_KEY in .env');
-        }
-        scraper = scrapeGooglePlaces;
-        break;
-      case 'googlemaps':
-        scraper = scrapeGoogleMaps;
-        break;
-      case 'yellowpages':
-        scraper = scrapeYellowPages;
-        break;
-      case 'yelp':
-      default:
-        scraper = scrapeYelp;
-    }
-
-    // Run scraper
-    for await (const prospect of scraper(scraperOptions, logger)) {
+    // Run Google Places scraper
+    for await (const prospect of scrapeGooglePlaces(scraperOptions, logger)) {
       clinicId++;
       const result = { clinic_id: clinicId, ...prospect };
       job.results.push(result);
@@ -251,7 +196,7 @@ async function runScraper(jobId, options) {
 
       if (prospect.phone_e164) job.stats.validPhones++;
       else job.stats.invalidPhones++;
-      if (prospect.email) job.stats.withEmail++;
+      if (prospect.website) job.stats.withWebsite++;
 
       // Push to webhook if configured
       if (options.webhookUrl) {
@@ -275,7 +220,6 @@ async function runScraper(jobId, options) {
     job.error = error.message;
     console.error(`Job ${jobId} failed:`, error);
   } finally {
-    await closeBrowser();
     logger.close();
   }
 }

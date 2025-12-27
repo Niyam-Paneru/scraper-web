@@ -3,38 +3,30 @@
 /**
  * Dental Clinic Prospect Finder
  * 
- * A CLI tool to scrape dental clinic listings from various sources
- * and output a clean CSV matching the AI agent upload schema.
+ * A CLI tool to find dental clinics using Google Places API.
+ * Returns REAL business data, not fake/generated data.
  * 
  * Usage:
- *   node scripts/dental_scraper.js --source yelp --location "Austin, TX" --max 50
- *   node scripts/dental_scraper.js --source places --location "Los Angeles, CA" --google-places-key YOUR_KEY
- *   node scripts/dental_scraper.js --source yelp --location "Miami, FL" --push-webhook http://localhost:3000/webhook
+ *   node scripts/dental_scraper.js --location "Austin, TX" --max 50
+ *   node scripts/dental_scraper.js --location "New York, NY" -k YOUR_API_KEY
+ * 
+ * Requires: GOOGLE_PLACES_KEY environment variable or --google-places-key flag
+ * Get your key at: https://console.cloud.google.com
  */
 
 import 'dotenv/config';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import fs from 'fs';
-import path from 'path';
 import axios from 'axios';
 
 import Logger from './lib/logger.js';
 import { writeProspectsCsv } from './lib/csvExporter.js';
-import { closeBrowser } from './lib/visitAndExtract.js';
-import { scrapeYelp } from './sources/yelp.js';
-import { scrapeYellowPages } from './sources/yellowpages.js';
 import { scrapeGooglePlaces } from './sources/places.js';
 
 // Parse command line arguments
 const argv = yargs(hideBin(process.argv))
   .usage('Usage: $0 [options]')
-  .option('source', {
-    alias: 's',
-    describe: 'Data source to scrape',
-    choices: ['yelp', 'yellowpages', 'places'],
-    default: 'yelp'
-  })
   .option('location', {
     alias: 'l',
     describe: 'Location to search (city, state)',
@@ -45,34 +37,18 @@ const argv = yargs(hideBin(process.argv))
     alias: 'm',
     describe: 'Maximum number of results',
     type: 'number',
-    default: 200
+    default: 50
   })
   .option('delay', {
     alias: 'd',
     describe: 'Delay between requests in milliseconds',
     type: 'number',
-    default: 1500
-  })
-  .option('concurrency', {
-    alias: 'c',
-    describe: 'Number of concurrent requests (not used for all sources)',
-    type: 'number',
-    default: 3
-  })
-  .option('proxy-file', {
-    describe: 'Path to file containing proxy list (one per line)',
-    type: 'string'
+    default: 200
   })
   .option('google-places-key', {
     alias: 'k',
     describe: 'Google Places API key (or set GOOGLE_PLACES_KEY env var)',
     type: 'string'
-  })
-  .option('enrich', {
-    alias: 'e',
-    describe: 'Try to enrich data by visiting contact pages for emails',
-    type: 'boolean',
-    default: false
   })
   .option('output', {
     alias: 'o',
@@ -82,48 +58,15 @@ const argv = yargs(hideBin(process.argv))
   })
   .option('push-webhook', {
     alias: 'w',
-    describe: 'Webhook URL to POST each lead as JSON (for n8n/automation)',
+    describe: 'Webhook URL to POST each lead as JSON',
     type: 'string'
   })
-  .example('$0 --source yelp --location "Austin, TX" --max 50', 'Scrape 50 dental clinics from Yelp')
-  .example('$0 --source places --location "New York, NY" -k YOUR_API_KEY', 'Use Google Places API (recommended)')
-  .example('$0 --source yelp --location "Miami, FL" --push-webhook http://localhost:3000/webhook', 'Push to webhook')
+  .example('$0 --location "Austin, TX" --max 50', 'Find 50 dental clinics in Austin')
+  .example('$0 --location "New York, NY" -k YOUR_API_KEY', 'Use specific API key')
+  .example('$0 --location "Miami, FL" -w http://localhost:3000/webhook', 'Push to webhook')
   .example('$0 --source yellowpages --location "Chicago, IL" --enrich', 'Scrape with email enrichment')
   .epilog('⚠️  Ethical Notice: Respect robots.txt and terms of service. Use Google Places API when possible.')
   .argv;
-
-/**
- * Load proxies from file
- * @param {string} filePath
- * @returns {string[]}
- */
-function loadProxies(filePath) {
-  if (!filePath || !fs.existsSync(filePath)) {
-    return [];
-  }
-  
-  const content = fs.readFileSync(filePath, 'utf-8');
-  return content
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line && !line.startsWith('#'));
-}
-
-/**
- * Get next proxy from list
- * @param {string[]} proxies
- * @param {number} index
- * @returns {{ proxy: string|null, nextIndex: number }}
- */
-function getNextProxy(proxies, index) {
-  if (!proxies || proxies.length === 0) {
-    return { proxy: null, nextIndex: 0 };
-  }
-  return {
-    proxy: proxies[index % proxies.length],
-    nextIndex: (index + 1) % proxies.length
-  };
-}
 
 /**
  * Push a lead to webhook (non-blocking, failures logged but not fatal)
@@ -151,71 +94,46 @@ async function pushToWebhook(webhookUrl, lead, logger) {
 async function main() {
   const logger = new Logger();
   
+  // Get Google Places key
+  const googlePlacesKey = argv.googlePlacesKey || process.env.GOOGLE_PLACES_KEY;
+  
+  if (!googlePlacesKey) {
+    console.error('\n❌ ERROR: Google Places API key required!\n');
+    console.error('Options:');
+    console.error('  1. Set GOOGLE_PLACES_KEY in your .env file');
+    console.error('  2. Pass --google-places-key YOUR_KEY\n');
+    console.error('Get your API key at: https://console.cloud.google.com');
+    console.error('See GOOGLE-PLACES-SETUP.md for step-by-step instructions.\n');
+    process.exit(1);
+  }
+  
   console.log('\n');
   console.log('╔════════════════════════════════════════════════════════════╗');
   console.log('║         🦷 Dental Clinic Prospect Finder 🦷                ║');
+  console.log('║           Using Google Places API (REAL DATA)              ║');
   console.log('╠════════════════════════════════════════════════════════════╣');
-  console.log(`║  Source:   ${argv.source.padEnd(47)}║`);
   console.log(`║  Location: ${argv.location.padEnd(47)}║`);
   console.log(`║  Max:      ${String(argv.max).padEnd(47)}║`);
   console.log(`║  Delay:    ${(argv.delay + 'ms').padEnd(47)}║`);
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('\n');
 
-  // Warn about scraping
-  if (argv.source !== 'places') {
-    logger.warn('⚠️  IMPORTANT: Web scraping may violate terms of service.');
-    logger.warn('⚠️  Yelp and YellowPages may block automated access.');
-    logger.warn('⚠️  For reliable results, use --source places with a Google API key.');
-    logger.warn('⚠️  You are responsible for complying with all applicable laws.\n');
-  }
-
-  // Load proxies if specified
-  const proxies = loadProxies(argv.proxyFile);
-  if (proxies.length > 0) {
-    logger.info(`Loaded ${proxies.length} proxies from ${argv.proxyFile}`);
-  }
-
-  // Get Google Places key
-  const googlePlacesKey = argv.googlePlacesKey || process.env.GOOGLE_PLACES_KEY;
-
   // Prepare options
   const options = {
     location: argv.location,
     max: argv.max,
     delay: argv.delay,
-    concurrency: argv.concurrency,
-    enrich: argv.enrich,
-    proxy: proxies.length > 0 ? proxies[0] : null,
     googlePlacesKey
   };
-
-  // Select and run scraper
-  let scraper;
-  switch (argv.source) {
-    case 'places':
-      if (!googlePlacesKey) {
-        logger.error('Google Places API key required. Use --google-places-key or set GOOGLE_PLACES_KEY env var.');
-        process.exit(1);
-      }
-      scraper = scrapeGooglePlaces;
-      break;
-    case 'yellowpages':
-      scraper = scrapeYellowPages;
-      break;
-    case 'yelp':
-    default:
-      scraper = scrapeYelp;
-  }
 
   // Collect results
   const prospects = [];
   let clinicId = 0;
   
   try {
-    logger.info(`Starting ${argv.source} scraper...`);
+    logger.info('Starting Google Places API search...');
     
-    for await (const prospect of scraper(options, logger)) {
+    for await (const prospect of scrapeGooglePlaces(options, logger)) {
       clinicId++;
       const leadWithId = { clinic_id: clinicId, ...prospect };
       prospects.push(leadWithId);
@@ -232,10 +150,7 @@ async function main() {
     }
     
   } catch (err) {
-    logger.error(`Scraper error: ${err.message}`);
-  } finally {
-    // Clean up browser
-    await closeBrowser();
+    logger.error(`API error: ${err.message}`);
   }
 
   console.log('\n');
@@ -268,8 +183,8 @@ async function main() {
   logger.close();
   
   console.log('\n');
-  console.log('Thank you for using Dental Clinic Prospect Finder!');
-  console.log('For best results, use Google Places API: --source places -k YOUR_KEY\n');
+  console.log('✅ Done! All data is REAL from Google Places API.');
+  console.log('📧 Next step: Add email generation with Gemini (see scraper-mods.md)\n');
 }
 
 // Run

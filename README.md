@@ -1,43 +1,26 @@
 # 🦷 Dental Clinic Prospect Finder
 
-AI-powered web application to find and qualify dental clinics for AI voice agent sales campaigns.
+Find **REAL** dental clinics using Google Places API for AI voice agent sales campaigns.
 
 ![Status](https://img.shields.io/badge/status-production--ready-brightgreen)
 ![Node](https://img.shields.io/badge/node-18+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## ✨ Features
+## ⚠️ IMPORTANT: Uses Real Data Only
 
-### 🔍 Smart Clinic Discovery
-- **Gemini Maps Grounding** - 500 FREE searches/day with real Google Maps data
-- **Multiple Sources** - Yelp, YellowPages, Google Maps scraping (fallback)
-- **Phone Validation** - Automatic E.164 normalization for dialers
-- **Real-time Progress** - Watch results populate as they're found
+This app uses **Google Places API** to get **REAL** business data:
+- ✅ Real business names
+- ✅ Real phone numbers
+- ✅ Real addresses
+- ✅ Real websites
 
-### 🤖 AI-Powered Lead Scoring
-- **Lead Scores (1-100)** - AI evaluates contract likelihood
-- **Priority Grades (A-F)** - Quick visual prioritization
-- **Personalized Insights** - Why each clinic is a good/bad fit
-- **Suggested Pitches** - Tailored talking points per clinic
-
-### 📧 AI Sales Assistant
-- **Cold Call Scripts** - Natural conversation starters
-- **Email Pitches** - Personalized outreach emails
-- **LinkedIn Messages** - Short professional intros
-- **Follow-up Templates** - Keep the conversation going
-- **Chat Interface** - Ask anything about your leads
-
-### 📊 Usage Tracking
-- **API Limits Dashboard** - Monitor Gemini usage (1500/day)
-- **Maps Quota** - Track grounding requests (500/day)
-- **Warning Levels** - 75%, 90%, 100% alerts
-- **Auto-reset** - Daily limits reset at midnight UTC
+**Requires:** Google Places API key (free $200/month credit)
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 18+
-- Gemini API Key (FREE at [aistudio.google.com](https://aistudio.google.com/apikey))
+- Google Places API Key (see [GOOGLE-PLACES-SETUP.md](GOOGLE-PLACES-SETUP.md))
 
 ### Installation
 
@@ -51,13 +34,31 @@ npm install
 cd client && npm install && cd ..
 
 # Configure environment
-echo "GEMINI_API_KEY=your_api_key_here" > .env
+echo "GOOGLE_PLACES_KEY=your_places_api_key_here" > .env
+echo "GEMINI_API_KEY=your_gemini_key_for_emails" >> .env
 
-# Start development (runs both server and client)
+# Start development
 npm run dev
 ```
 
 App runs at http://localhost:5173 (frontend) and http://localhost:3001 (API)
+
+## ✨ Features
+
+### 🔍 Real Clinic Discovery
+- **Google Places API** - Real business data from Google
+- **Phone Validation** - Automatic E.164 normalization for dialers
+- **Real-time Progress** - Watch results populate as they're found
+
+### 🤖 AI-Powered Lead Scoring
+- **Lead Scores (1-100)** - AI evaluates contract likelihood
+- **Priority Grades (A-F)** - Quick visual prioritization
+- **Personalized Insights** - Why each clinic is a good/bad fit
+
+### 📧 AI Sales Assistant (Requires Gemini API Key)
+- **Cold Call Scripts** - Natural conversation starters
+- **Email Pitches** - Personalized outreach emails
+- **Chat Interface** - Ask anything about your leads
 
 ## 🌐 Deployment
 

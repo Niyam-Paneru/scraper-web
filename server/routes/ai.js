@@ -1,10 +1,12 @@
 /**
- * AI Routes - Gemini-powered features
+ * AI Routes - Gemini, HuggingFace, and Firecrawl powered features
  */
 
 import express from 'express';
 import GeminiService from '../services/gemini.js';
 import usageTracker from '../services/apiUsageTracker.js';
+import huggingface from '../services/huggingface.js';
+import firecrawl from '../services/firecrawl.js';
 
 const router = express.Router();
 
@@ -19,12 +21,22 @@ function getGemini() {
 
 /**
  * GET /api/ai/status
- * Check if Gemini is configured
+ * Check all AI services status
  */
 router.get('/status', (req, res) => {
   res.json({
-    configured: !!process.env.GEMINI_API_KEY,
-    model: 'gemini-1.5-flash',
+    gemini: {
+      configured: !!process.env.GEMINI_API_KEY,
+      model: 'gemini-2.0-flash-lite'
+    },
+    huggingface: {
+      configured: huggingface.isConfigured(),
+      features: ['sentiment', 'classification', 'summarization', 'lead-scoring']
+    },
+    firecrawl: {
+      configured: firecrawl.isConfigured(),
+      features: ['fast-scraping', 'email-extraction']
+    },
     usage: usageTracker.getStatus()
   });
 });
@@ -346,81 +358,383 @@ router.post('/analyze-fit', async (req, res) => {
 
 /**
  * POST /api/ai/enrich-clinic
- * Scrape clinic website to find email and detect AI/chatbots
+ * REAL web scraping to find email and detect chatbots
+ * Uses Playwright to actually visit the website instead of AI guessing
  */
 router.post('/enrich-clinic', async (req, res) => {
+  const { clinic } = req.body;
+  
+  if (!clinic) {
+    return res.status(400).json({ error: 'Clinic data is required' });
+  }
+
+  // Check if we have a website to scrape
+  if (!clinic.website) {
+    return res.status(400).json({ 
+      error: 'No website available to scrape',
+      suggestion: 'Use the Google search link to find the clinic website first'
+    });
+  }
+
+  // Skip Google Maps links
+  if (clinic.website.includes('maps.google.com') || clinic.website.includes('goo.gl')) {
+    return res.status(400).json({ 
+      error: 'Cannot scrape Google Maps links',
+      suggestion: 'Find the actual clinic website using Google search'
+    });
+  }
+
+  try {
+    // Try Firecrawl first (faster), fallback to Playwright
+    let enrichedData;
+    
+    if (firecrawl.isConfigured()) {
+      console.log(`🔥 Using Firecrawl for: ${clinic.website}`);
+      const result = await firecrawl.extractEmails(clinic.website);
+      enrichedData = {
+        email: result.bestEmail,
+        emails_found: result.emails,
+        source: 'firecrawl'
+      };
+    } else {
+      // Fallback to Playwright scraper
+      const emailScraper = (await import('../services/emailScraper.js')).default;
+      console.log(`🔍 Using Playwright for: ${clinic.website}`);
+      enrichedData = await emailScraper.enrichClinic(clinic);
+      enrichedData.source = 'playwright';
+    }
+    
+    console.log(`✅ Scrape complete for ${clinic.clinic_name || clinic.name}:`, {
+      emailsFound: enrichedData.emails_found?.length || 0,
+      bestEmail: enrichedData.email
+    });
+
+    res.json({ 
+      enrichedData,
+      source: enrichedData.source || 'real-scrape',
+      usage: usageTracker.getStatus() 
+    });
+  } catch (error) {
+    console.error('Enrichment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// NEW AI FEATURES - HuggingFace & Gemini
+// ============================================
+
+/**
+ * POST /api/ai/analyze-sentiment
+ * Analyze sentiment of reviews or text using HuggingFace
+ */
+router.post('/analyze-sentiment', async (req, res) => {
+  const { text } = req.body;
+  
+  if (!text) {
+    return res.status(400).json({ error: 'Text is required' });
+  }
+
+  if (!huggingface.isConfigured()) {
+    return res.status(400).json({ error: 'HuggingFace API key not configured' });
+  }
+
+  try {
+    const result = await huggingface.analyzeSentiment(text);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/classify-clinic
+ * Classify clinic type (cosmetic, pediatric, etc.) using HuggingFace
+ */
+router.post('/classify-clinic', async (req, res) => {
+  const { text, clinicName } = req.body;
+  
+  if (!text && !clinicName) {
+    return res.status(400).json({ error: 'Text or clinicName is required' });
+  }
+
+  if (!huggingface.isConfigured()) {
+    return res.status(400).json({ error: 'HuggingFace API key not configured' });
+  }
+
+  try {
+    const result = await huggingface.classifyClinic(text || clinicName);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/score-lead
+ * Score a clinic lead using HuggingFace analysis
+ */
+router.post('/score-lead', async (req, res) => {
+  const { clinic } = req.body;
+  
+  if (!clinic) {
+    return res.status(400).json({ error: 'Clinic data is required' });
+  }
+
+  try {
+    const score = await huggingface.analyzeClinicPresence(clinic);
+    res.json(score);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/batch-score-leads
+ * Score multiple clinic leads at once
+ */
+router.post('/batch-score-leads', async (req, res) => {
+  const { clinics } = req.body;
+  
+  if (!clinics || !Array.isArray(clinics)) {
+    return res.status(400).json({ error: 'Clinics array is required' });
+  }
+
+  try {
+    const results = await Promise.all(
+      clinics.map(async (clinic) => {
+        const score = await huggingface.analyzeClinicPresence(clinic);
+        return { ...clinic, leadScore: score };
+      })
+    );
+    
+    // Sort by score (highest first)
+    results.sort((a, b) => b.leadScore.score - a.leadScore.score);
+    
+    res.json({ 
+      clinics: results,
+      summary: {
+        total: results.length,
+        gradeA: results.filter(c => c.leadScore.grade === 'A').length,
+        gradeB: results.filter(c => c.leadScore.grade === 'B').length,
+        gradeC: results.filter(c => c.leadScore.grade === 'C').length,
+        gradeD: results.filter(c => c.leadScore.grade === 'D').length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/generate-campaign
+ * Generate a full email campaign for multiple clinics using Gemini
+ */
+router.post('/generate-campaign', async (req, res) => {
   const gemini = getGemini();
   if (!gemini) {
     return res.status(400).json({ error: 'Gemini API key not configured' });
   }
 
-  const { clinic } = req.body;
-  if (!clinic || !clinic.website) {
-    return res.status(400).json({ error: 'Clinic with website is required' });
-  }
-
-  // Skip Google Maps links
-  if (clinic.website.includes('maps.google.com') || clinic.website.includes('goo.gl')) {
-    return res.status(400).json({ error: 'Cannot scrape Google Maps links' });
+  const { clinics, campaignType = 'introduction', senderInfo } = req.body;
+  
+  if (!clinics || !Array.isArray(clinics)) {
+    return res.status(400).json({ error: 'Clinics array is required' });
   }
 
   try {
-    // Use Gemini to analyze the website
-    const prompt = `You are a web scraper assistant. I need you to help me find information from a dental clinic website.
-
-Website: ${clinic.website}
-Clinic: ${clinic.clinic_name || clinic.name}
-
-Please analyze what you can determine about this clinic and respond in JSON format:
-{
-  "email": "found email address or null",
-  "emails_found": ["list of all email addresses found"],
-  "has_chatbot": true/false (if they have a chat widget, AI assistant, or chatbot),
-  "chatbot_type": "name of chatbot if detected (Intercom, Drift, LiveChat, custom, etc) or null",
-  "has_online_booking": true/false,
-  "booking_system": "name of booking system if detected or null",
-  "social_media": {
-    "facebook": "url or null",
-    "instagram": "url or null",
-    "twitter": "url or null"
-  },
-  "tech_stack_notes": "any notable technology they use",
-  "competition_level": "low/medium/high - how sophisticated is their current tech?"
-}
-
-IMPORTANT: 
-- Look for email addresses like info@, contact@, appointments@, etc
-- Look for chat widgets in the corner (Intercom, Drift, Zendesk, etc)
-- Check if they have online booking systems
-- Be honest if you cannot access the website - return nulls`;
-
-    const response = await gemini.generate(prompt, { 
-      clinic,
-      task: 'website-enrichment'
-    });
+    const emails = [];
     
-    usageTracker.trackGeminiRequest(0, true);
+    for (const clinic of clinics.slice(0, 10)) { // Limit to 10 at a time
+      const prompt = `Generate a professional ${campaignType} email for a dental clinic.
 
-    // Try to parse the JSON from the response
-    let enrichedData = {};
-    try {
-      // Extract JSON from response (it might be wrapped in markdown)
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        enrichedData = JSON.parse(jsonMatch[0]);
+Clinic: ${clinic.clinic_name || clinic.name}
+Location: ${clinic.city || ''}, ${clinic.state || ''}
+${clinic.services ? `Services: ${clinic.services}` : ''}
+${senderInfo ? `Sender: ${senderInfo.name} from ${senderInfo.company}` : ''}
+
+Write a personalized, professional email that:
+1. Has a compelling subject line
+2. Opens with something specific about their clinic
+3. Clearly states the value proposition
+4. Has a clear call to action
+5. Is under 150 words
+
+Return as JSON: {"subject": "...", "body": "...", "callToAction": "..."}`;
+
+      try {
+        const response = await gemini.generate(prompt);
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const emailData = JSON.parse(jsonMatch[0]);
+          emails.push({
+            clinic: clinic.clinic_name || clinic.name,
+            clinicEmail: clinic.email,
+            ...emailData
+          });
+        }
+      } catch (err) {
+        console.error(`Failed to generate email for ${clinic.clinic_name}:`, err.message);
       }
-    } catch (parseErr) {
-      console.error('Failed to parse enrichment response:', parseErr);
-      enrichedData = { raw_response: response };
+      
+      // Small delay between requests
+      await new Promise(r => setTimeout(r, 500));
     }
 
     res.json({ 
-      enrichedData,
-      usage: usageTracker.getStatus() 
+      emails,
+      count: emails.length,
+      usage: usageTracker.getStatus()
     });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/analyze-competitor
+ * Analyze a competitor dental clinic using Gemini
+ */
+router.post('/analyze-competitor', async (req, res) => {
+  const gemini = getGemini();
+  if (!gemini) {
+    return res.status(400).json({ error: 'Gemini API key not configured' });
+  }
+
+  const { clinic, targetAudience } = req.body;
+  
+  if (!clinic) {
+    return res.status(400).json({ error: 'Clinic data is required' });
+  }
+
+  try {
+    const prompt = `Analyze this dental clinic as a competitor:
+
+Name: ${clinic.clinic_name || clinic.name}
+Location: ${clinic.address || ''}, ${clinic.city || ''} ${clinic.state || ''}
+Rating: ${clinic.rating || 'Unknown'} (${clinic.reviewCount || 0} reviews)
+Website: ${clinic.website || 'None'}
+Services: ${clinic.services || 'Unknown'}
+
+Provide a competitive analysis:
+1. Strengths (what they do well)
+2. Weaknesses (opportunities for competitors)
+3. Target market they seem to serve
+4. Pricing tier estimate (budget/mid/premium)
+5. Online presence score (1-10)
+6. Suggested approach if reaching out to them
+
+Return as JSON with keys: strengths[], weaknesses[], targetMarket, pricingTier, onlineScore, approachStrategy`;
+
+    const response = await gemini.generate(prompt);
+    usageTracker.trackGeminiRequest(0, true);
+    
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const analysis = JSON.parse(jsonMatch[0]);
+      res.json({ analysis, usage: usageTracker.getStatus() });
+    } else {
+      res.json({ rawAnalysis: response, usage: usageTracker.getStatus() });
+    }
+  } catch (error) {
     usageTracker.trackGeminiRequest(0, false);
-    console.error('Enrichment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/generate-followup
+ * Generate follow-up email based on previous interaction
+ */
+router.post('/generate-followup', async (req, res) => {
+  const gemini = getGemini();
+  if (!gemini) {
+    return res.status(400).json({ error: 'Gemini API key not configured' });
+  }
+
+  const { clinic, previousEmail, daysSince, outcome } = req.body;
+  
+  if (!clinic || !previousEmail) {
+    return res.status(400).json({ error: 'Clinic and previous email are required' });
+  }
+
+  try {
+    const prompt = `Generate a follow-up email for a dental clinic.
+
+Clinic: ${clinic.clinic_name || clinic.name}
+Days since last contact: ${daysSince || 7}
+Previous outcome: ${outcome || 'no response'}
+
+Previous email subject: ${previousEmail.subject}
+Previous email body: ${previousEmail.body?.slice(0, 200)}...
+
+Write a professional follow-up that:
+1. References the previous email
+2. Adds new value or information
+3. Creates urgency without being pushy
+4. Has a different angle than before
+5. Is shorter than the original (under 100 words)
+
+Return as JSON: {"subject": "...", "body": "...", "timing": "best time to send"}`;
+
+    const response = await gemini.generate(prompt);
+    usageTracker.trackGeminiRequest(0, true);
+    
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      res.json({ email: JSON.parse(jsonMatch[0]), usage: usageTracker.getStatus() });
+    } else {
+      res.json({ rawEmail: response, usage: usageTracker.getStatus() });
+    }
+  } catch (error) {
+    usageTracker.trackGeminiRequest(0, false);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/firecrawl-scrape
+ * Use Firecrawl to scrape a website for emails (faster than Playwright)
+ */
+router.post('/firecrawl-scrape', async (req, res) => {
+  if (!firecrawl.isConfigured()) {
+    return res.status(400).json({ 
+      error: 'Firecrawl API key not configured',
+      hint: 'Add FIRECRAWL_API_KEY to .env file. Get one at https://firecrawl.dev'
+    });
+  }
+
+  const { url } = req.body;
+  
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+
+  try {
+    const result = await firecrawl.extractEmails(url);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/ai/summarize-clinic
+ * Summarize clinic information using HuggingFace
+ */
+router.post('/summarize-clinic', async (req, res) => {
+  if (!huggingface.isConfigured()) {
+    return res.status(400).json({ error: 'HuggingFace API key not configured' });
+  }
+
+  const { text, clinic } = req.body;
+  
+  const inputText = text || `${clinic?.clinic_name || ''} is a dental clinic located in ${clinic?.city || ''}, ${clinic?.state || ''}. They offer ${clinic?.services || 'dental services'}. Rating: ${clinic?.rating || 'N/A'}`;
+
+  try {
+    const result = await huggingface.summarize(inputText);
+    res.json(result);
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
