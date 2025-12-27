@@ -12,6 +12,7 @@ import 'dotenv/config';
 
 import apiRoutes from './routes/api.js';
 import aiRoutes from './routes/ai.js';
+import emailRoutes from './routes/email.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,7 @@ app.use(express.json());
 // API Routes
 app.use('/api', apiRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/email', emailRoutes);
 
 // Serve static frontend (production build)
 const distPath = path.join(__dirname, '../client/dist');

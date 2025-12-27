@@ -69,6 +69,19 @@ function App() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const chatEndRef = useRef(null);
 
+  // Email Campaign state
+  const [emailStatus, setEmailStatus] = useState(null);
+  const [emailTemplates, setEmailTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [testEmailAddress, setTestEmailAddress] = useState('');
+  const [previewClinic, setPreviewClinic] = useState(null);
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailSendProgress, setEmailSendProgress] = useState(null);
+  const [selectedEmailClinics, setSelectedEmailClinics] = useState([]);
+
   // Apply theme to document
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -338,6 +351,24 @@ function App() {
       .then(res => res.json())
       .then(setAiStatus)
       .catch(() => setAiStatus({ configured: false }));
+
+    // Load email status and templates
+    fetch('/api/email/status')
+      .then(res => res.json())
+      .then(setEmailStatus)
+      .catch(() => setEmailStatus({ configured: false }));
+
+    fetch('/api/email/templates')
+      .then(res => res.json())
+      .then(templates => {
+        setEmailTemplates(templates);
+        if (templates.length > 0 && !selectedTemplate) {
+          setSelectedTemplate(templates[0]);
+          setEmailSubject(templates[0].subject);
+          setEmailBody(templates[0].html);
+        }
+      })
+      .catch(console.error);
 
     loadUsage();
     
@@ -642,6 +673,210 @@ function App() {
     }
   };
 
+  // Email Campaign Functions
+  
+  // Get clinics with emails
+  const clinicsWithEmail = currentJob?.results?.filter(c => c.email) || [];
+  
+  // Preview email for a clinic
+  const handlePreviewEmail = async (clinic) => {
+    setPreviewClinic(clinic);
+    try {
+      const res = await fetch('/api/email/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: emailSubject,
+          html: emailBody,
+          clinic
+        })
+      });
+      const data = await res.json();
+      setPreviewHtml(data.html);
+    } catch (err) {
+      showToast('Failed to generate preview', 'error');
+    }
+  };
+
+  // Send test email to yourself
+  const handleSendTestEmail = async () => {
+    if (!testEmailAddress.trim()) {
+      showToast('Enter your email address first', 'error');
+      return;
+    }
+    
+    setIsSendingEmail(true);
+    try {
+      const res = await fetch('/api/email/send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: testEmailAddress,
+          subject: emailSubject,
+          html: emailBody,
+          testClinic: previewClinic || {
+            clinic_name: 'Test Dental Clinic',
+            owner_name: 'Dr. John Smith',
+            city: 'Miami',
+            state: 'FL'
+          }
+        })
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        showToast(`✅ Test email sent to ${testEmailAddress}`, 'success');
+      } else {
+        showToast(data.error || 'Failed to send test email', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  // Send email to single clinic
+  const handleSendSingleEmail = async (clinic) => {
+    if (!clinic.email) {
+      showToast('This clinic has no email', 'error');
+      return;
+    }
+    
+    setIsSendingEmail(true);
+    try {
+      const res = await fetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: clinic.email,
+          subject: emailSubject,
+          html: emailBody,
+          clinic
+        })
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        showToast(`✅ Email sent to ${clinic.email}`, 'success');
+        // Update lead status
+        updateLeadStatus(clinic.clinic_id, 'contacted');
+      } else {
+        showToast(data.error || 'Failed to send email', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  // Send bulk emails
+  const handleSendBulkEmails = async () => {
+    const recipients = selectedEmailClinics
+      .filter(c => c.email)
+      .map(c => ({ email: c.email, clinic: c }));
+    
+    if (recipients.length === 0) {
+      showToast('No clinics with emails selected', 'error');
+      return;
+    }
+    
+    if (!confirm(`Send emails to ${recipients.length} clinics?`)) {
+      return;
+    }
+    
+    setIsSendingEmail(true);
+    setEmailSendProgress({ current: 0, total: recipients.length, sent: 0, failed: 0 });
+    
+    try {
+      const res = await fetch('/api/email/send-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipients,
+          template: {
+            subject: emailSubject,
+            html: emailBody
+          },
+          delayMs: 2000
+        })
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        showToast(`✅ Sent ${data.sent} emails (${data.failed} failed)`, 'success');
+        // Update lead statuses for sent emails
+        recipients.forEach(r => {
+          const clinic = currentJob?.results?.find(c => c.email === r.email);
+          if (clinic) {
+            updateLeadStatus(clinic.clinic_id, 'contacted');
+          }
+        });
+        setSelectedEmailClinics([]);
+      } else {
+        showToast(data.error || 'Failed to send emails', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setIsSendingEmail(false);
+      setEmailSendProgress(null);
+    }
+  };
+
+  // Toggle clinic selection for bulk email
+  const toggleClinicSelection = (clinic) => {
+    setSelectedEmailClinics(prev => {
+      const exists = prev.find(c => c.clinic_id === clinic.clinic_id);
+      if (exists) {
+        return prev.filter(c => c.clinic_id !== clinic.clinic_id);
+      } else {
+        return [...prev, clinic];
+      }
+    });
+  };
+
+  // Select all clinics with email
+  const selectAllWithEmail = () => {
+    if (selectedEmailClinics.length === clinicsWithEmail.length) {
+      setSelectedEmailClinics([]);
+    } else {
+      setSelectedEmailClinics(clinicsWithEmail);
+    }
+  };
+
+  // Save template
+  const handleSaveTemplate = async () => {
+    const name = prompt('Template name:');
+    if (!name) return;
+    
+    try {
+      const res = await fetch('/api/email/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          subject: emailSubject,
+          html: emailBody
+        })
+      });
+      const template = await res.json();
+      setEmailTemplates(prev => [...prev, template]);
+      showToast('Template saved!', 'success');
+    } catch (err) {
+      showToast('Failed to save template', 'error');
+    }
+  };
+
+  // Load template
+  const handleLoadTemplate = (template) => {
+    setSelectedTemplate(template);
+    setEmailSubject(template.subject);
+    setEmailBody(template.html);
+    showToast(`Loaded: ${template.name}`, 'info');
+  };
+
   return (
     <div className="app-layout">
       {/* Header */}
@@ -663,11 +898,14 @@ function App() {
             <span>Find Clinics</span>
           </button>
           <button 
-            className={`nav-btn ${activeTab === 'ai' ? 'active' : ''}`}
-            onClick={() => setActiveTab('ai')}
+            className={`nav-btn ${activeTab === 'email' ? 'active' : ''}`}
+            onClick={() => setActiveTab('email')}
           >
-            <span className="nav-icon">🤖</span>
-            <span>AI Assistant</span>
+            <span className="nav-icon">📧</span>
+            <span>Email Campaign</span>
+            {clinicsWithEmail.length > 0 && (
+              <span className="nav-badge">{clinicsWithEmail.length}</span>
+            )}
           </button>
         </nav>
         
@@ -1180,55 +1418,235 @@ function App() {
               )}
             </>
           ) : (
-            /* AI Chat Tab */
-            <div className="chat-section">
-              <div className="chat-container">
-                <div className="chat-messages">
-                  {chatMessages.length === 0 && (
-                    <div className="chat-empty">
-                      <div className="chat-empty-icon">🤖</div>
-                      <h3>AI Sales Assistant</h3>
-                      <p>I can help you write emails, create call scripts, and analyze leads for your AI voice agent sales.</p>
-                      <div className="quick-prompts">
-                        <button onClick={() => setChatInput('Write an introduction email for a dental clinic')}>
-                          📧 Intro Email
-                        </button>
-                        <button onClick={() => setChatInput('Create a cold call script for AI voice agent sales')}>
-                          📞 Call Script
-                        </button>
-                        <button onClick={() => setChatInput('Analyze my leads and suggest which to contact first')}>
-                          📊 Analyze Leads
-                        </button>
-                      </div>
+            /* Email Campaign Tab */
+            <div className="email-campaign-section">
+              {/* Email Status Banner */}
+              {!emailStatus?.configured && (
+                <div className="setup-banner email-setup">
+                  <div className="setup-banner-content">
+                    <div className="setup-icon">📧</div>
+                    <div className="setup-text">
+                      <h3>Mailgun Setup Required</h3>
+                      <p>Add your Mailgun API key to send emails. Get one at <a href="https://app.mailgun.com" target="_blank" rel="noopener noreferrer">app.mailgun.com</a></p>
                     </div>
-                  )}
-                  {chatMessages.map((msg, i) => (
-                    <div key={i} className={`chat-message ${msg.role}`}>
-                      <div className="message-content">{msg.content}</div>
+                    <div className="setup-note">
+                      Required: MAILGUN_API_KEY, MAILGUN_DOMAIN, MAILGUN_FROM_EMAIL
                     </div>
-                  ))}
-                  {isChatLoading && (
-                    <div className="chat-message assistant">
-                      <div className="message-content typing">
-                        <span></span><span></span><span></span>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={chatEndRef} />
+                  </div>
                 </div>
-                <form className="chat-input-form" onSubmit={handleSendMessage}>
-                  <input
-                    type="text"
-                    className="chat-input"
-                    placeholder="Ask me anything about your leads..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    disabled={isChatLoading}
-                  />
-                  <button type="submit" className="btn btn-primary" disabled={isChatLoading || !chatInput.trim()}>
-                    Send
-                  </button>
-                </form>
+              )}
+
+              <div className="email-layout">
+                {/* Left Panel - Email List */}
+                <div className="email-list-panel">
+                  <div className="panel-header">
+                    <h3>📋 Clinics with Email ({clinicsWithEmail.length})</h3>
+                    {clinicsWithEmail.length > 0 && (
+                      <button className="btn btn-sm btn-secondary" onClick={selectAllWithEmail}>
+                        {selectedEmailClinics.length === clinicsWithEmail.length ? 'Deselect All' : 'Select All'}
+                      </button>
+                    )}
+                  </div>
+                  
+                  {clinicsWithEmail.length === 0 ? (
+                    <div className="empty-email-list">
+                      <span className="empty-icon">📭</span>
+                      <p>No clinics with emails yet</p>
+                      <p className="text-muted">Scrape clinic websites to find emails</p>
+                    </div>
+                  ) : (
+                    <div className="email-clinic-list">
+                      {clinicsWithEmail.map(clinic => (
+                        <div 
+                          key={clinic.clinic_id}
+                          className={`email-clinic-item ${selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id) ? 'selected' : ''} ${previewClinic?.clinic_id === clinic.clinic_id ? 'previewing' : ''}`}
+                        >
+                          <label className="clinic-checkbox">
+                            <input 
+                              type="checkbox"
+                              checked={!!selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id)}
+                              onChange={() => toggleClinicSelection(clinic)}
+                            />
+                          </label>
+                          <div className="clinic-email-info" onClick={() => handlePreviewEmail(clinic)}>
+                            <div className="clinic-email-name">{clinic.clinic_name || clinic.name}</div>
+                            <div className="clinic-email-address">{clinic.email}</div>
+                            <div className="clinic-email-meta">
+                              {clinic.city && <span>{clinic.city}</span>}
+                              {clinic.rating && <span>⭐ {clinic.rating}</span>}
+                              {leadStatuses[clinic.clinic_id] === 'contacted' && <span className="sent-badge">✓ Sent</span>}
+                            </div>
+                          </div>
+                          <div className="clinic-email-actions">
+                            <button 
+                              className="btn btn-sm btn-primary"
+                              onClick={() => handleSendSingleEmail(clinic)}
+                              disabled={isSendingEmail || !emailStatus?.configured}
+                              title="Send email to this clinic"
+                            >
+                              📤
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedEmailClinics.length > 0 && (
+                    <div className="bulk-send-bar">
+                      <span>{selectedEmailClinics.length} selected</span>
+                      <button 
+                        className="btn btn-primary"
+                        onClick={handleSendBulkEmails}
+                        disabled={isSendingEmail || !emailStatus?.configured}
+                      >
+                        {isSendingEmail ? 'Sending...' : `Send to ${selectedEmailClinics.length} Clinics`}
+                      </button>
+                    </div>
+                  )}
+
+                  {emailSendProgress && (
+                    <div className="send-progress">
+                      <div className="progress-bar">
+                        <div 
+                          className="progress-fill"
+                          style={{ width: `${(emailSendProgress.current / emailSendProgress.total) * 100}%` }}
+                        />
+                      </div>
+                      <span>{emailSendProgress.current} / {emailSendProgress.total} sent</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Middle Panel - Template Editor */}
+                <div className="email-editor-panel">
+                  <div className="panel-header">
+                    <h3>✏️ Email Template</h3>
+                    <div className="template-actions">
+                      <select 
+                        className="template-select"
+                        value={selectedTemplate?.id || ''}
+                        onChange={(e) => {
+                          const t = emailTemplates.find(t => t.id === e.target.value);
+                          if (t) handleLoadTemplate(t);
+                        }}
+                      >
+                        {emailTemplates.map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                      <button className="btn btn-sm btn-secondary" onClick={handleSaveTemplate}>
+                        💾 Save
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="email-editor">
+                    <div className="form-group">
+                      <label>Subject Line</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={emailSubject}
+                        onChange={(e) => setEmailSubject(e.target.value)}
+                        placeholder="Quick question for {{clinic_name}}"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Email Body (HTML)</label>
+                      <textarea
+                        className="email-body-editor"
+                        value={emailBody}
+                        onChange={(e) => setEmailBody(e.target.value)}
+                        placeholder="Write your email template here..."
+                        rows={15}
+                      />
+                    </div>
+                    <div className="template-variables">
+                      <span className="var-label">Variables:</span>
+                      <code>{'{{clinic_name}}'}</code>
+                      <code>{'{{owner_name}}'}</code>
+                      <code>{'{{city}}'}</code>
+                      <code>{'{{rating}}'}</code>
+                      <code>{'{{website}}'}</code>
+                    </div>
+                  </div>
+
+                  {/* Test Send Section */}
+                  <div className="test-send-section">
+                    <h4>🧪 Test Email</h4>
+                    <div className="test-send-form">
+                      <input
+                        type="email"
+                        className="form-control"
+                        value={testEmailAddress}
+                        onChange={(e) => setTestEmailAddress(e.target.value)}
+                        placeholder="your@email.com"
+                      />
+                      <button 
+                        className="btn btn-secondary"
+                        onClick={handleSendTestEmail}
+                        disabled={isSendingEmail || !emailStatus?.configured}
+                      >
+                        {isSendingEmail ? 'Sending...' : 'Send Test'}
+                      </button>
+                    </div>
+                    <p className="test-hint">Send a test email to yourself before sending to real clinics</p>
+                  </div>
+                </div>
+
+                {/* Right Panel - Preview */}
+                <div className="email-preview-panel">
+                  <div className="panel-header">
+                    <h3>👁️ Preview</h3>
+                    {previewClinic && (
+                      <span className="preview-for">for {previewClinic.clinic_name || previewClinic.name}</span>
+                    )}
+                  </div>
+                  
+                  <div className="email-preview">
+                    {previewHtml ? (
+                      <div className="preview-content">
+                        <div className="preview-meta">
+                          <div><strong>To:</strong> {previewClinic?.email}</div>
+                          <div><strong>From:</strong> {emailStatus?.fromEmail || 'founder@dentsignal.me'}</div>
+                        </div>
+                        <div 
+                          className="preview-body"
+                          dangerouslySetInnerHTML={{ __html: previewHtml }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="preview-empty">
+                        <span className="preview-icon">👆</span>
+                        <p>Click on a clinic to preview how the email will look</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Mailgun Status */}
+                  <div className="mailgun-status">
+                    <h4>📊 Mailgun Status</h4>
+                    <div className="status-grid">
+                      <div className="status-item">
+                        <span className={`status-indicator ${emailStatus?.configured ? 'online' : 'offline'}`}></span>
+                        <span>{emailStatus?.configured ? 'Connected' : 'Not configured'}</span>
+                      </div>
+                      {emailStatus?.domain && (
+                        <div className="status-item">
+                          <span className="status-label">Domain:</span>
+                          <span>{emailStatus.domain}</span>
+                        </div>
+                      )}
+                      {emailStatus?.fromEmail && (
+                        <div className="status-item">
+                          <span className="status-label">From:</span>
+                          <span>{emailStatus.fromEmail}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
