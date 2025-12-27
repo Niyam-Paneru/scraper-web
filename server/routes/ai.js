@@ -60,13 +60,13 @@ router.get('/usage', (req, res) => {
 function getAlerts(status, limits) {
   const alerts = [];
   
-  if (limits.gemini.dailyLimitReached) {
+  if (limits.gemini?.dailyLimitReached) {
     alerts.push({
       type: 'error',
       service: 'gemini',
       message: '🚨 Gemini daily limit reached! Switch API key or wait for reset.'
     });
-  } else if (status.gemini.warningLevel === 'high') {
+  } else if (status.gemini?.warningLevel === 'high') {
     alerts.push({
       type: 'warning',
       service: 'gemini',
@@ -74,21 +74,15 @@ function getAlerts(status, limits) {
     });
   }
   
-  if (limits.geminiMaps.dailyLimitReached) {
-    alerts.push({
-      type: 'error',
-      service: 'geminiMaps',
-      message: '🚨 Gemini Maps daily limit (500) reached! Switch API key or use other scrapers.'
-    });
-  } else if (status.geminiMaps.warningLevel === 'high') {
+  if (limits.googlePlaces?.percentUsed >= 90) {
     alerts.push({
       type: 'warning',
-      service: 'geminiMaps',
-      message: `⚠️ Maps usage at ${status.geminiMaps.percentUsed}% - ${status.geminiMaps.remaining} requests left`
+      service: 'googlePlaces',
+      message: `⚠️ Google Places credit at ${limits.googlePlaces.percentUsed}% - $${limits.googlePlaces.creditRemaining} remaining`
     });
   }
   
-  if (limits.gemini.rateLimited) {
+  if (limits.gemini?.rateLimited) {
     alerts.push({
       type: 'warning',
       service: 'gemini',

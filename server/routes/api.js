@@ -7,6 +7,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { scrapeGooglePlaces } from '../../scripts/sources/places.js';
 import Logger from '../../scripts/lib/logger.js';
+import usageTracker from '../services/apiUsageTracker.js';
 
 const router = express.Router();
 
@@ -31,6 +32,22 @@ router.get('/status', (req, res) => {
       : 'Google Places API key required. See GOOGLE-PLACES-SETUP.md',
     timestamp: new Date().toISOString()
   });
+});
+
+/**
+ * GET /api/usage
+ * Get API usage and credit information
+ */
+router.get('/usage', (req, res) => {
+  res.json(usageTracker.getStatus());
+});
+
+/**
+ * GET /api/credit
+ * Get Google Places credit information
+ */
+router.get('/credit', (req, res) => {
+  res.json(usageTracker.getGooglePlacesStatus());
 });
 
 /**
@@ -187,9 +204,16 @@ async function runScraper(jobId, options) {
       googlePlacesKey: process.env.GOOGLE_PLACES_KEY
     };
 
+    // Track the text search API call
+    usageTracker.trackPlacesTextSearch();
+    
     // Run Google Places scraper
     for await (const prospect of scrapeGooglePlaces(scraperOptions, logger)) {
       clinicId++;
+      
+      // Track each place details API call
+      usageTracker.trackPlacesDetails();
+      
       const result = { clinic_id: clinicId, ...prospect };
       job.results.push(result);
       job.stats.total = clinicId;

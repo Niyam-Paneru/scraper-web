@@ -1,16 +1,20 @@
 /**
  * API Usage Tracker
- * Tracks Gemini API usage and rate limits
+ * Tracks Gemini API usage and Google Places API cost
  * 
- * Free Tier Limits (as of Dec 2024):
- * - Gemini 2.0 Flash: 15 RPM, 1M TPM, 1500 RPD
- * - Gemini Maps Grounding: 500 requests/day
+ * Google Places API Pricing:
+ * - Text Search: $32 per 1000 requests
+ * - Place Details: $17 per 1000 requests
+ * - Free credit: $200/month (resets monthly)
  */
 
 class ApiUsageTracker {
   constructor() {
-    // Reset usage at midnight
+    // Reset usage at midnight for daily limits
     this.resetDaily();
+    
+    // Monthly credit tracking for Google Places
+    this.initMonthlyCredit();
     
     // Track per-minute requests for rate limiting
     this.minuteRequests = [];
@@ -22,9 +26,24 @@ class ApiUsageTracker {
         requestsPerDay: 1500,
         tokensPerMinute: 1000000
       },
-      geminiMaps: {
-        requestsPerDay: 500
+      googlePlaces: {
+        monthlyCredit: 200.00, // $200 free credit
+        textSearchCostPer1000: 32.00,
+        placeDetailsCostPer1000: 17.00
       }
+    };
+  }
+
+  initMonthlyCredit() {
+    const now = new Date();
+    // Reset on 1st of each month
+    this.monthlyReset = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0);
+    
+    this.googlePlacesUsage = {
+      textSearches: 0,
+      placeDetails: 0,
+      totalCost: 0,
+      lastRequest: null
     };
   }
 
@@ -38,20 +57,43 @@ class ApiUsageTracker {
         tokensToday: 0,
         lastRequest: null,
         errors: 0
-      },
-      geminiMaps: {
-        requestsToday: 0,
-        lastRequest: null,
-        errors: 0
       }
     };
   }
 
-  // Check if we need to reset (new day)
+  // Check if we need to reset (new day or new month)
   checkReset() {
-    if (new Date() >= this.dailyReset) {
+    const now = new Date();
+    if (now >= this.dailyReset) {
       this.resetDaily();
     }
+    if (now >= this.monthlyReset) {
+      this.initMonthlyCredit();
+    }
+  }
+
+  // Track Google Places Text Search
+  trackPlacesTextSearch(resultCount = 1) {
+    this.checkReset();
+    
+    this.googlePlacesUsage.textSearches++;
+    const cost = this.limits.googlePlaces.textSearchCostPer1000 / 1000;
+    this.googlePlacesUsage.totalCost += cost;
+    this.googlePlacesUsage.lastRequest = new Date().toISOString();
+    
+    return this.getGooglePlacesStatus();
+  }
+
+  // Track Google Places Details request
+  trackPlacesDetails(count = 1) {
+    this.checkReset();
+    
+    this.googlePlacesUsage.placeDetails += count;
+    const cost = (this.limits.googlePlaces.placeDetailsCostPer1000 / 1000) * count;
+    this.googlePlacesUsage.totalCost += cost;
+    this.googlePlacesUsage.lastRequest = new Date().toISOString();
+    
+    return this.getGooglePlacesStatus();
   }
 
   // Track a Gemini API request
@@ -74,18 +116,37 @@ class ApiUsageTracker {
     return this.getStatus();
   }
 
-  // Track a Gemini Maps request
-  trackGeminiMapsRequest(success = true) {
+  // Get Google Places usage status
+  getGooglePlacesStatus() {
     this.checkReset();
     
-    this.usage.geminiMaps.requestsToday++;
-    this.usage.geminiMaps.lastRequest = new Date().toISOString();
+    const creditUsed = this.googlePlacesUsage.totalCost;
+    const creditRemaining = Math.max(0, this.limits.googlePlaces.monthlyCredit - creditUsed);
+    const percentUsed = (creditUsed / this.limits.googlePlaces.monthlyCredit) * 100;
     
-    if (!success) {
-      this.usage.geminiMaps.errors++;
-    }
+    // Calculate days until reset
+    const now = new Date();
+    const daysUntilReset = Math.ceil((this.monthlyReset - now) / (1000 * 60 * 60 * 24));
     
-    return this.getStatus();
+    // Estimate how many more clinics can be scraped
+    // Each clinic = 1 text search query share + 1 place details = ~$0.049
+    const costPerClinic = (this.limits.googlePlaces.textSearchCostPer1000 / 1000 / 20) + 
+                          (this.limits.googlePlaces.placeDetailsCostPer1000 / 1000);
+    const clinicsRemaining = Math.floor(creditRemaining / costPerClinic);
+    
+    return {
+      creditTotal: this.limits.googlePlaces.monthlyCredit,
+      creditUsed: Math.round(creditUsed * 100) / 100,
+      creditRemaining: Math.round(creditRemaining * 100) / 100,
+      percentUsed: Math.round(percentUsed),
+      textSearches: this.googlePlacesUsage.textSearches,
+      placeDetails: this.googlePlacesUsage.placeDetails,
+      clinicsScraped: this.googlePlacesUsage.placeDetails,
+      clinicsRemaining: clinicsRemaining,
+      daysUntilReset: daysUntilReset,
+      resetAt: this.monthlyReset.toISOString(),
+      lastRequest: this.googlePlacesUsage.lastRequest
+    };
   }
 
   // Check if we're approaching limits
@@ -102,10 +163,7 @@ class ApiUsageTracker {
         requestsThisMinute: recentRequests,
         warningLevel: this.getWarningLevel('gemini')
       },
-      geminiMaps: {
-        dailyLimitReached: this.usage.geminiMaps.requestsToday >= this.limits.geminiMaps.requestsPerDay,
-        warningLevel: this.getWarningLevel('geminiMaps')
-      }
+      googlePlaces: this.getGooglePlacesStatus()
     };
   }
 
@@ -116,8 +174,8 @@ class ApiUsageTracker {
     let percentUsed;
     if (service === 'gemini') {
       percentUsed = (this.usage.gemini.requestsToday / this.limits.gemini.requestsPerDay) * 100;
-    } else {
-      percentUsed = (this.usage.geminiMaps.requestsToday / this.limits.geminiMaps.requestsPerDay) * 100;
+    } else if (service === 'googlePlaces') {
+      percentUsed = (this.googlePlacesUsage.totalCost / this.limits.googlePlaces.monthlyCredit) * 100;
     }
     
     if (percentUsed >= 100) return 'critical';
@@ -150,15 +208,7 @@ class ApiUsageTracker {
         lastRequest: this.usage.gemini.lastRequest,
         warningLevel: this.getWarningLevel('gemini')
       },
-      geminiMaps: {
-        used: this.usage.geminiMaps.requestsToday,
-        limit: this.limits.geminiMaps.requestsPerDay,
-        remaining: this.limits.geminiMaps.requestsPerDay - this.usage.geminiMaps.requestsToday,
-        percentUsed: Math.round((this.usage.geminiMaps.requestsToday / this.limits.geminiMaps.requestsPerDay) * 100),
-        errors: this.usage.geminiMaps.errors,
-        lastRequest: this.usage.geminiMaps.lastRequest,
-        warningLevel: this.getWarningLevel('geminiMaps')
-      },
+      googlePlaces: this.getGooglePlacesStatus(),
       resetIn: `${hoursUntilReset}h ${minutesUntilReset}m`,
       resetAt: this.dailyReset.toISOString()
     };

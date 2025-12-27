@@ -5,6 +5,7 @@ function App() {
   const [serverStatus, setServerStatus] = useState(null);
   const [aiStatus, setAiStatus] = useState(null);
   const [apiUsage, setApiUsage] = useState(null);
+  const [creditInfo, setCreditInfo] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [currentJob, setCurrentJob] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -319,6 +320,11 @@ function App() {
     fetch('/api/ai/usage')
       .then(res => res.json())
       .then(setApiUsage)
+      .catch(console.error);
+    
+    fetch('/api/credit')
+      .then(res => res.json())
+      .then(setCreditInfo)
       .catch(console.error);
   }, []);
 
@@ -747,19 +753,62 @@ function App() {
             </div>
           </div>
 
+          {/* Google Places Credit Display */}
+          <div className="sidebar-section credit-section">
+            <h3 className="sidebar-title">
+              <span>💳</span> Monthly Credit
+            </h3>
+            <div className="credit-display">
+              <div className="credit-amount">
+                <span className="credit-used">${creditInfo?.creditUsed?.toFixed(2) || '0.00'}</span>
+                <span className="credit-separator">/</span>
+                <span className="credit-total">${creditInfo?.creditTotal?.toFixed(2) || '200.00'}</span>
+              </div>
+              <div className="credit-bar-container">
+                <div className="credit-bar">
+                  <div 
+                    className="credit-fill"
+                    style={{ 
+                      width: `${Math.min(creditInfo?.percentUsed || 0, 100)}%`,
+                      backgroundColor: (creditInfo?.percentUsed || 0) > 80 ? '#ef4444' : (creditInfo?.percentUsed || 0) > 50 ? '#f59e0b' : '#22c55e'
+                    }}
+                  ></div>
+                </div>
+              </div>
+              <div className="credit-stats">
+                <div className="credit-stat">
+                  <span className="credit-stat-value">{creditInfo?.clinicsScraped || 0}</span>
+                  <span className="credit-stat-label">clinics scraped</span>
+                </div>
+                <div className="credit-stat">
+                  <span className="credit-stat-value">~{creditInfo?.clinicsRemaining?.toLocaleString() || '4,000'}</span>
+                  <span className="credit-stat-label">remaining</span>
+                </div>
+              </div>
+              <div className="credit-reset">
+                🔄 Resets in {creditInfo?.daysUntilReset || 30} days
+              </div>
+              {!serverStatus?.hasGooglePlacesKey && (
+                <div className="credit-setup-hint">
+                  <span>🔑</span> Add API key to start
+                </div>
+              )}
+            </div>
+          </div>
+
           {apiUsage && (
             <div className="sidebar-section usage-section">
-              <h3 className="sidebar-title">API Usage</h3>
+              <h3 className="sidebar-title">AI Usage</h3>
               <div className="usage-bar-container">
                 <div className="usage-bar">
                   <div 
                     className="usage-fill"
                     style={{ 
-                      width: `${apiUsage.geminiMaps?.percentUsed || 0}%`,
+                      width: `${apiUsage.gemini?.percentUsed || 0}%`,
                     }}
                   ></div>
                 </div>
-                <span className="usage-text">{apiUsage.geminiMaps?.remaining || 0} left</span>
+                <span className="usage-text">{apiUsage.gemini?.remaining || 0} AI calls left</span>
               </div>
             </div>
           )}
