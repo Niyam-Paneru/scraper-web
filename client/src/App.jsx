@@ -99,22 +99,6 @@ function App() {
     city: ''
   });
 
-  // Normalize incoming templates (strip HTML tags to plain text)
-  const htmlToPlain = useCallback((html = '') => {
-    if (!html) return '';
-    // If it already looks like plain text, leave it
-    if (!/<[a-z][\s\S]*>/i.test(html)) return html;
-
-    let text = html
-      .replace(/<br\s*\/?\s*>/gi, '\n')
-      .replace(/<p[^>]*>/gi, '')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<[^>]+>/g, '');
-
-    text = text.replace(/\n{3,}/g, '\n\n').trim();
-    return text;
-  }, []);
-
   // Apply theme to document
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -404,17 +388,11 @@ function App() {
     fetch('/api/email/templates')
       .then(res => res.json())
       .then(templates => {
-        // Normalize any HTML templates into plain text so the editor stays clean
-        const normalized = templates.map(t => ({
-          ...t,
-          html: htmlToPlain(t.html)
-        }));
-
-        setEmailTemplates(normalized);
-        if (normalized.length > 0 && !selectedTemplate) {
-          setSelectedTemplate(normalized[0]);
-          setEmailSubject(normalized[0].subject);
-          setEmailBody(normalized[0].html);
+        setEmailTemplates(templates);
+        if (templates.length > 0 && !selectedTemplate) {
+          setSelectedTemplate(templates[0]);
+          setEmailSubject(templates[0].subject);
+          setEmailBody(templates[0].html);
         }
       })
       .catch(console.error);
@@ -1068,10 +1046,9 @@ function App() {
 
   // Load template
   const handleLoadTemplate = (template) => {
-    const normalizedHtml = htmlToPlain(template.html);
-    setSelectedTemplate({ ...template, html: normalizedHtml });
+    setSelectedTemplate(template);
     setEmailSubject(template.subject);
-    setEmailBody(normalizedHtml);
+    setEmailBody(template.html);
     showToast(`Loaded: ${template.name}`, 'info');
   };
 
@@ -1972,7 +1949,7 @@ Your Name"
                           }}
                           placeholder="Dr. John Smith"
                         />
-                        <span className="input-hint">Used for {{owner_name}} variable</span>
+                        <span className="input-hint">Used for {'{'}{'{'} owner_name {'}'}{'}'} variable</span>
                       </div>
                       <div className="form-group">
                         <label>Clinic Name <span className="optional">(for personalization)</span></label>
@@ -1986,7 +1963,7 @@ Your Name"
                           }}
                           placeholder="Bright Smile Dental"
                         />
-                        <span className="input-hint">Used for {{clinic_name}} variable</span>
+                        <span className="input-hint">Used for {'{'}{'{'} clinic_name {'}'}{'}'} variable</span>
                       </div>
                       <div className="form-group">
                         <label>City <span className="optional">(for personalization)</span></label>
@@ -2000,7 +1977,7 @@ Your Name"
                           }}
                           placeholder="Miami, FL"
                         />
-                        <span className="input-hint">Used for {{city}} variable</span>
+                        <span className="input-hint">Used for {'{'}{'{'} city {'}'}{'}'} variable</span>
                       </div>
 
                       <div className="custom-form-actions">
