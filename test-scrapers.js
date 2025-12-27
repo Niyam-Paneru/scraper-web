@@ -7,7 +7,7 @@ console.log('\n🧪 SCRAPER COMPARISON TEST\n');
 console.log('='.repeat(50));
 
 // Test Gemini API first
-console.log('\n1️⃣ Testing GEMINI API Key...');
+console.log('\n 1️⃣ Testing GEMINI API Key...');
 try {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${process.env.GEMINI_API_KEY}`,

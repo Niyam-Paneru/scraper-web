@@ -11,20 +11,24 @@ const router = express.Router();
 // Store email templates in memory (you could use a database later)
 let emailTemplates = [
   {
-    id: 'default',
-    name: 'Introduction Template',
-    subject: 'Quick question for {{clinic_name}}',
+    id: 'dentsignal-intro',
+    name: 'DentSignal Introduction',
+    subject: 'How many calls is {{clinic_name}} missing?',
     html: `Hi {{owner_name}},
 
-I came across {{clinic_name}} while researching dental practices in {{city}}, and I was impressed by your {{rating}} rating.
+Quick question - how many calls does {{clinic_name}} miss each month? After-hours, lunch breaks, when your team is with patients?
 
-I'm reaching out because we help dental clinics like yours [YOUR VALUE PROPOSITION HERE].
+Most dental practices we talk to are missing 30-40% of incoming calls. At an average patient value of $600+, that's often $20K+ in lost revenue monthly.
 
-Would you be open to a quick 10-minute call this week to see if it might be a fit?
+I built DentSignal - an AI voice agent that answers your phones 24/7, books appointments into your system, and handles FAQs. It's HIPAA compliant and costs less than 1 hour of front desk wages.
 
-Best regards,
+👉 Call our demo line right now: (904) 867-9643
+
+Would a quick 10-minute call make sense to see if this could work for {{clinic_name}}?
+
+Best,
 [YOUR NAME]
-[YOUR COMPANY]
+DentSignal
 
 ---
 If you'd prefer not to receive emails from us, just reply with "unsubscribe".`,
@@ -32,19 +36,47 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`,
     createdAt: new Date().toISOString()
   },
   {
-    id: 'follow-up',
-    name: 'Follow-up Template',
-    subject: 'Following up - {{clinic_name}}',
+    id: 'dentsignal-followup',
+    name: 'DentSignal Follow-up',
+    subject: 'Did you try the demo? - {{clinic_name}}',
     html: `Hi {{owner_name}},
 
-I wanted to follow up on my previous email about {{clinic_name}}.
+Following up on my note about missed calls at {{clinic_name}}.
 
-I know you're busy running your practice, so I'll keep this brief - we've helped dental clinics in {{city}} [SPECIFIC BENEFIT].
+Did you get a chance to call our AI demo line? (904) 867-9643
 
-Would a quick 10-minute chat work this week?
+Most dentists who try it are pretty surprised - it sounds natural, books appointments, and answers insurance questions.
+
+I'd love to show you how this could work for your specific practice. 10 minutes?
 
 Best,
-[YOUR NAME]`,
+[YOUR NAME]
+DentSignal`,
+    text: '',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'dentsignal-breakup',
+    name: 'DentSignal Last Chance',
+    subject: 'Closing the loop - {{clinic_name}}',
+    html: `Hi {{owner_name}},
+
+I've reached out a couple times about helping {{clinic_name}} capture more revenue from missed calls, but haven't heard back.
+
+No worries at all - I know you're busy. I'll assume the timing isn't right and won't keep bugging you.
+
+But just in case you're curious later, here's what we do:
+• AI answers calls 24/7 (after-hours, lunch, busy times)
+• Books appointments directly into your system
+• HIPAA compliant, sounds natural
+• $149/month - pays for itself with 1 new patient
+
+If anything changes, our demo line is always available: (904) 867-9643
+
+Best of luck with everything at {{clinic_name}}!
+
+[YOUR NAME]
+DentSignal`,
     text: '',
     createdAt: new Date().toISOString()
   }

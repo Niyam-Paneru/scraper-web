@@ -1,50 +1,46 @@
 /**
  * Gemini AI Service
  * 
- * Provides AI-powered features for the dental scraper:
- * - Generate personalized outreach emails
- * - Analyze clinic data
- * - Answer project-related questions ONLY
- * - LEAD SCORING for AI voice agent sales
+ * Provides AI-powered features for DentSignal lead generation:
+ * - Generate personalized outreach for DentSignal AI voice agent
+ * - Analyze clinic data for sales potential
+ * - LEAD SCORING for DentSignal sales
  * - Personalized pitch generation
  */
 
-const SYSTEM_PROMPT = `You are a specialized AI assistant for the Dental Clinic Prospect Finder tool. 
-Your ONLY purpose is to help users with tasks related to dental clinic prospecting and selling AI voice agent services.
+const SYSTEM_PROMPT = `You are a specialized AI assistant for DentSignal - an AI voice agent for dental clinics.
+
+ABOUT DENTSIGNAL:
+- AI voice agent that answers dental clinic phones 24/7
+- Books appointments directly into practice management systems
+- Handles FAQs about insurance, hours, services
+- HIPAA compliant
+- Costs $149-199/month (less than 1 hour of front desk wages)
+- Demo line: (904) 867-9643 - prospects can call anytime to hear it
+- Main value prop: Dental clinics miss 30-40% of calls = $20K+/month in lost revenue
 
 YOU CAN HELP WITH:
-- Writing personalized outreach emails to dental clinics
+- Writing personalized outreach emails about DentSignal
+- Creating cold call scripts mentioning the demo line
+- Scoring leads based on likelihood to buy DentSignal
 - Analyzing scraped clinic data for sales potential
-- Scoring leads based on likelihood to buy AI voice agent services
-- Creating call scripts for AI voice agents
 - Generating personalized sales pitches
 - Suggesting follow-up strategies
-- Prioritizing which clinics to contact first
 
-YOU CANNOT HELP WITH:
-- General knowledge questions (geography, history, science, etc.)
-- Anything unrelated to dental clinic prospecting or AI voice agent sales
-- Personal advice or opinions on non-work topics
-- Coding or technical questions outside this tool
-
-If asked about anything outside your scope, respond with:
-"I'm specifically designed to help with dental clinic prospecting and AI voice agent sales. I can help you score leads, write pitches, or create outreach strategies. What would you like me to help with?"
-
-CONTEXT ABOUT THE USER'S BUSINESS:
-The user is selling an AI Voice Agent service to dental clinics. The AI can:
-- Automatically call patients to remind them of appointments
-- Schedule new appointments
-- Handle patient inquiries 24/7
-- Follow up on missed appointments
-- The user offers a demo and free trial
-- Future features: Auto-calling, social media ads integration, lead generation
+KEY SELLING POINTS TO USE:
+1. Missed calls = missed revenue ($600+ per new patient)
+2. After-hours and lunch breaks are revenue killers
+3. No more hold music or voicemail
+4. Demo line proves it works: (904) 867-9643
+5. ROI: 1 new patient/month covers the cost 10x
+6. Better than Weave/competitors - AI actually answers, not just routes
 
 When writing pitches or emails:
-- Be professional but conversational
-- Focus on the clinic's pain points (missed calls, no-shows, after-hours inquiries)
-- Highlight ROI (more appointments = more revenue)
-- Offer a free demo or trial
-- Keep it concise and action-oriented`;
+- Always mention the demo line: (904) 867-9643
+- Focus on missed calls = lost money ($20K/month)
+- Be conversational, not corporate
+- Keep it short - busy dentists won't read walls of text
+- End with clear CTA (call demo or schedule 10-min chat)`;
 
 class GeminiService {
   constructor(apiKey) {
@@ -193,11 +189,11 @@ Make it conversational, under 200 words, with clear pauses and response handling
   }
 
   /**
-   * Score a lead for AI voice agent sales potential
+   * Score a lead for DentSignal sales potential
    * Returns a score 1-100 and detailed analysis
    */
   async scoreLeadForVoiceAgent(clinic) {
-    const prompt = `Analyze this dental clinic and score their likelihood to purchase an AI voice agent service.
+    const prompt = `Score this dental clinic for DentSignal AI voice agent sales.
 
 CLINIC DATA:
 - Name: ${clinic.clinic_name || clinic.name}
@@ -209,12 +205,19 @@ CLINIC DATA:
 - Hours: ${clinic.hours || 'Unknown'}
 - City: ${clinic.city || 'Unknown'}, ${clinic.state || ''}
 
-SCORING CRITERIA:
-1. BUSY PRACTICE (High reviews = busy = needs help with calls)
-2. GOOD REPUTATION (High rating = they care about patient experience)
-3. HAS WEBSITE (Tech-savvy, more likely to adopt AI)
-4. LIMITED HOURS (Need after-hours solution)
-5. LOCATION (Competitive markets = more pressure to innovate)
+DENTSIGNAL IDEAL CUSTOMER:
+- Busy practices (lots of reviews = lots of calls)
+- Good reputation (they care about patient experience)
+- Has website (tech-savvy, will adopt AI)
+- Limited/standard hours (need after-hours solution)
+- Solo/small practice (no dedicated call center)
+
+SCORING GUIDE:
+90-100: Perfect fit - busy, good reviews, likely drowning in calls
+70-89: Great fit - solid practice that would benefit
+50-69: Decent fit - might need more convincing
+30-49: Weak fit - may have objections
+0-29: Poor fit - unlikely to buy
 
 Return a JSON object with EXACTLY this format (no markdown, no code blocks, just raw JSON):
 {
@@ -222,15 +225,15 @@ Return a JSON object with EXACTLY this format (no markdown, no code blocks, just
   "grade": "A",
   "likelihood": "High",
   "reasons": [
-    "High volume practice with 1000+ reviews needs automation",
-    "5-star rating shows they value patient experience",
-    "Limited hours create need for 24/7 AI receptionist"
+    "High volume with 200+ reviews = overwhelmed front desk",
+    "4.8 rating shows they prioritize patient experience",
+    "Would benefit from 24/7 call coverage"
   ],
   "concerns": [
-    "May already have staff handling calls"
+    "May already use Weave or similar"
   ],
-  "bestApproach": "Lead with the after-hours coverage angle",
-  "suggestedPitch": "Brief 2-sentence pitch",
+  "bestApproach": "Lead with missed calls during lunch stat",
+  "openingLine": "Quick question - how many calls does your team miss during lunch?",
   "priority": 1
 }`;
 
@@ -277,47 +280,66 @@ Return a JSON object with EXACTLY this format (no markdown, no code blocks, just
   }
 
   /**
-   * Generate personalized AI voice agent pitch for a clinic
+   * Generate personalized DentSignal pitch for a clinic
    */
   async generateVoiceAgentPitch(clinic, pitchType = 'cold-call') {
+    const clinicName = clinic.clinic_name || clinic.name;
     const pitchTypes = {
-      'cold-call': `Create a cold call script for selling an AI voice agent to ${clinic.clinic_name || clinic.name}.
-The call should:
-- Be natural and conversational (not salesy)
-- Start with a question about their current appointment scheduling
-- Mention their great reviews (${clinic.reviewCount || 'many'} reviews, ${clinic.rating || 'high'} stars)
-- Offer a free demo
-- Be under 60 seconds when spoken
-- Handle objections gracefully
+      'cold-call': `Create a cold call script for selling DentSignal to ${clinicName}.
 
-Format as a script with [PAUSE], [IF OBJECTION], etc.`,
+The script should:
+- Open by asking how many calls they miss during lunch or after hours
+- Mention you saw their ${clinic.reviewCount || 'great'} reviews - busy practices miss more calls
+- Introduce DentSignal: "AI that answers your phones 24/7, books appointments, sounds natural"
+- Give them the demo number: (904) 867-9643 - tell them to call it right now
+- Ask for a 10-minute call to show how it works for THEIR practice
+- Be under 45 seconds, conversational, not salesy
+- Handle "we're not interested" with: "Totally get it. Before I go, what do you do when calls come in during lunch?"
 
-      'email': `Write a cold email to ${clinic.clinic_name || clinic.name} (${clinic.address || 'location unknown'}).
-Pitch our AI voice agent that can:
-- Call patients to remind them of appointments
-- Schedule appointments 24/7
-- Handle after-hours inquiries
-- Reduce no-shows by 40%
+Format with [PAUSE], [IF THEY SAY...], etc.`,
 
-Reference their ${clinic.reviewCount || ''} reviews and ${clinic.rating || ''} rating.
-Offer a free demo. Keep it under 150 words.`,
+      'email': `Write a cold email from DentSignal to ${clinicName}.
 
-      'linkedin': `Write a LinkedIn message to the owner/manager of ${clinic.clinic_name || clinic.name}.
-Keep it super short (under 50 words), professional, and offer value.
-Mention AI voice agents for dental clinics.`,
+MUST INCLUDE:
+- Subject line that creates curiosity (not salesy)
+- Open with question about missed calls
+- One stat: "Most dental practices miss 30-40% of calls = $20K+ lost revenue/month"
+- What DentSignal does in one sentence
+- Demo line: (904) 867-9643 - tell them to call it
+- CTA: 10-minute chat or just try the demo
+- Sign off as the founder, keep it human
 
-      'follow-up': `Write a follow-up message for ${clinic.clinic_name || clinic.name}.
-Reference a previous conversation about AI voice agents.
-Add urgency without being pushy.
-Offer to answer any questions.`,
+Keep under 120 words. No fluff. Sound like a real person, not marketing.`,
 
-      'demo-offer': `Create a demo offer email for ${clinic.clinic_name || clinic.name}.
-Explain:
-- How the AI voice agent demo works
-- They can test it with their own patients
-- No commitment required
-- We'll set up a custom demo for their clinic
-- Include a clear call-to-action`
+      'linkedin': `Write a LinkedIn connection message for the owner/manager of ${clinicName}.
+
+Rules:
+- Under 40 words (LinkedIn truncates longer)
+- Don't pitch immediately, create curiosity
+- Mention you help dental clinics capture missed calls
+- Ask a question or offer value
+- No "I'd love to connect" generic stuff`,
+
+      'follow-up': `Write a follow-up email for ${clinicName} who didn't respond to the first DentSignal email.
+
+The follow-up should:
+- Be even shorter than the first email (under 80 words)
+- Reference the demo line again: (904) 867-9643
+- Add mild urgency without being pushy
+- Try a different angle (maybe they're losing patients to competitors with better phone service)
+- End with simple yes/no CTA`,
+
+      'demo-offer': `Write a "demo offer" email for ${clinicName}.
+
+This is for warm leads who showed interest. Include:
+- Enthusiasm (but not cheesy)
+- What happens in the demo (we set up a test number for their practice)
+- It's free and takes 10 minutes
+- They can hear how it sounds with their practice name
+- Demo line to try first: (904) 867-9643
+- Clear scheduling CTA
+
+Keep under 100 words.`
     };
 
     const prompt = pitchTypes[pitchType] || pitchTypes['cold-call'];

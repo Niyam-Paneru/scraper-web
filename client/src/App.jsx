@@ -71,10 +71,36 @@ function App() {
 
   // Email Campaign state
   const [emailStatus, setEmailStatus] = useState(null);
-  const [emailTemplates, setEmailTemplates] = useState([]);
+  const [emailTemplates, setEmailTemplates] = useState(() => {
+    const saved = localStorage.getItem('emailTemplates');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [emailSubject, setEmailSubject] = useState('');
-  const [emailBody, setEmailBody] = useState('');
+  const [emailSubject, setEmailSubject] = useState(() => {
+    const saved = localStorage.getItem('emailSubject');
+    return saved || 'How many calls is {{clinic_name}} missing?';
+  });
+  const [emailBody, setEmailBody] = useState(() => {
+    const saved = localStorage.getItem('emailBody');
+    return saved || `Hi {{owner_name}},
+
+Quick question - how many calls does {{clinic_name}} miss each month? After-hours, lunch breaks, when your team is with patients?
+
+Most dental practices we talk to are missing 30-40% of incoming calls. At an average patient value of $600+, that's often $20K+ in lost revenue monthly.
+
+I built DentSignal - an AI voice agent that answers your phones 24/7, books appointments into your system, and handles FAQs. It's HIPAA compliant and costs less than 1 hour of front desk wages.
+
+👉 Call our demo line right now: (904) 867-9643
+
+Would a quick 10-minute call make sense to see if this could work for {{clinic_name}}?
+
+Best,
+[YOUR NAME]
+DentSignal
+
+---
+If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
+  });
   const [testEmailAddress, setTestEmailAddress] = useState('');
   const [previewClinic, setPreviewClinic] = useState(null);
   const [previewHtml, setPreviewHtml] = useState('');
@@ -91,13 +117,14 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [showSentEmails, setShowSentEmails] = useState(true);
-  const [emailSubView, setEmailSubView] = useState('list'); // 'list' or 'custom'
+  const [emailSubView, setEmailSubView] = useState('contacts'); // 'contacts', 'compose', 'templates'
   const [customEmailForm, setCustomEmailForm] = useState({
     recipientEmail: '',
     recipientName: '',
     clinicName: '',
     city: ''
   });
+  const [editingTemplate, setEditingTemplate] = useState(null);
 
   // Apply theme to document
   useEffect(() => {
@@ -141,6 +168,22 @@ function App() {
   useEffect(() => {
     localStorage.setItem('removedEmailIds', JSON.stringify(removedEmailIds));
   }, [removedEmailIds]);
+
+  // Save email templates to localStorage
+  useEffect(() => {
+    if (emailTemplates.length > 0) {
+      localStorage.setItem('emailTemplates', JSON.stringify(emailTemplates));
+    }
+  }, [emailTemplates]);
+
+  // Save email subject and body to localStorage
+  useEffect(() => {
+    localStorage.setItem('emailSubject', emailSubject);
+  }, [emailSubject]);
+
+  useEffect(() => {
+    localStorage.setItem('emailBody', emailBody);
+  }, [emailBody]);
 
   // Lead management functions
   const updateLeadStatus = (clinicId, status) => {
@@ -630,11 +673,11 @@ function App() {
     setActiveTab('ai');
     
     const pitchLabels = {
-      'cold-call': '📞 Cold Call Script',
-      'email': '📧 Email Pitch',
+      'cold-call': '📞 Cold Call Script (DentSignal)',
+      'email': '📧 Email Pitch (Missed Calls)',
       'linkedin': '💼 LinkedIn Message',
-      'follow-up': '✍️ Follow-up',
-      'demo-offer': '🎯 Demo Offer'
+      'follow-up': '✍️ Follow-up (Demo Reminder)',
+      'demo-offer': '🎯 Demo Offer (904) 867-9643'
     };
     
     setChatMessages(prev => [...prev, { 
@@ -1058,9 +1101,9 @@ function App() {
       <header className="header">
         <div className="header-left">
           <div className="logo">
-            <span className="logo-icon">🦷</span>
-            <span className="logo-text">DentalFinder</span>
-            <span className="logo-badge">PRO</span>
+            <span className="logo-icon">📞</span>
+            <span className="logo-text">DentSignal</span>
+            <span className="logo-badge">LEADS</span>
           </div>
         </div>
         
@@ -1108,28 +1151,46 @@ function App() {
         {/* Sidebar */}
         <aside className="sidebar">
           <div className="sidebar-section">
-            <h3 className="sidebar-title">Pipeline</h3>
+            <h3 className="sidebar-title">Sales Pipeline</h3>
             <div className="pipeline-stats">
               <div className="stat-item">
                 <span className="stat-dot blue"></span>
-                <span className="stat-label">New</span>
+                <span className="stat-label">New Leads</span>
                 <span className="stat-count">{currentJob?.results?.filter(r => !leadStatuses[r.clinic_id] || leadStatuses[r.clinic_id] === 'new').length || 0}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-dot yellow"></span>
-                <span className="stat-label">Contacted</span>
+                <span className="stat-label">Emailed</span>
                 <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'contacted').length || 0}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-dot green"></span>
-                <span className="stat-label">Interested</span>
+                <span className="stat-label">Demo Booked</span>
                 <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'interested').length || 0}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-dot purple"></span>
-                <span className="stat-label">Won</span>
+                <span className="stat-label">Closed 💰</span>
                 <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'won').length || 0}</span>
               </div>
+            </div>
+          </div>
+
+          {/* DentSignal Demo CTA */}
+          <div className="sidebar-section demo-cta-section">
+            <h3 className="sidebar-title">📞 Demo Line</h3>
+            <div className="demo-cta">
+              <a href="tel:+19048679643" className="demo-number">(904) 867-9643</a>
+              <button 
+                className="btn-copy-demo"
+                onClick={() => {
+                  navigator.clipboard.writeText('(904) 867-9643');
+                  showToast('Demo number copied!', 'success');
+                }}
+              >
+                📋 Copy
+              </button>
+              <p className="demo-hint">Share this with prospects!</p>
             </div>
           </div>
 
@@ -1253,8 +1314,8 @@ function App() {
               {/* Hero Search Section */}
               <div className="hero-search">
                 <div className="hero-content">
-                  <h1 className="hero-title">Find Real Dental Clinics</h1>
-                  <p className="hero-subtitle">Powered by Google Places API • Real data, not fake generated content</p>
+                  <h1 className="hero-title">Find Clinics Losing Money on Missed Calls</h1>
+                  <p className="hero-subtitle">Powered by Google Places API • Real contacts for DentSignal outreach</p>
                   
                   <form onSubmit={handleSubmit} className="hero-form">
                     <div className="search-input-group">
@@ -1593,49 +1654,96 @@ function App() {
               )}
             </>
           ) : (
-            /* Email Campaign Tab */
-            <div className="email-campaign-section">
-              {/* Email Status Banner */}
-              {!emailStatus?.configured && (
-                <div className="setup-banner email-setup">
-                  <div className="setup-banner-content">
-                    <div className="setup-icon">📧</div>
-                    <div className="setup-text">
-                      <h3>Mailgun Setup Required</h3>
-                      <p>Add your Mailgun API key to send emails. Get one at <a href="https://app.mailgun.com" target="_blank" rel="noopener noreferrer">app.mailgun.com</a></p>
-                    </div>
-                    <div className="setup-note">
-                      Required: MAILGUN_API_KEY, MAILGUN_DOMAIN, MAILGUN_FROM_EMAIL
-                    </div>
+            /* Email Campaign Tab - Redesigned Professional UI */
+            <div className="email-campaign-page">
+              {/* Top Status Bar */}
+              <div className="email-status-bar">
+                <div className="status-bar-left">
+                  <div className={`connection-status ${emailStatus?.configured ? 'connected' : 'disconnected'}`}>
+                    <span className="status-indicator"></span>
+                    <span>{emailStatus?.configured ? 'Mailgun Connected' : 'Not Connected'}</span>
                   </div>
+                  {emailStatus?.configured && (
+                    <span className="status-domain">{emailStatus.domain}</span>
+                  )}
                 </div>
-              )}
+                <div className="status-bar-right">
+                  <span className="contacts-count">{clinicsWithEmail.length} contacts</span>
+                  <span className="selected-count">{selectedEmailClinics.length} selected</span>
+                </div>
+              </div>
 
-              {/* Sub Navigation */}
-              <div className="email-sub-nav">
+              {/* Sub Navigation Tabs */}
+              <div className="email-tabs">
                 <button 
-                  className={`sub-nav-btn ${emailSubView === 'list' ? 'active' : ''}`}
-                  onClick={() => setEmailSubView('list')}
+                  className={`email-tab ${emailSubView === 'contacts' ? 'active' : ''}`}
+                  onClick={() => setEmailSubView('contacts')}
                 >
-                  📋 Email List
+                  <span className="tab-icon">👥</span>
+                  <span className="tab-label">Contacts</span>
                 </button>
                 <button 
-                  className={`sub-nav-btn ${emailSubView === 'custom' ? 'active' : ''}`}
-                  onClick={() => setEmailSubView('custom')}
+                  className={`email-tab ${emailSubView === 'compose' ? 'active' : ''}`}
+                  onClick={() => setEmailSubView('compose')}
                 >
-                  ✉️ Send Custom Email
+                  <span className="tab-icon">✉️</span>
+                  <span className="tab-label">Compose</span>
+                </button>
+                <button 
+                  className={`email-tab ${emailSubView === 'templates' ? 'active' : ''}`}
+                  onClick={() => setEmailSubView('templates')}
+                >
+                  <span className="tab-icon">📋</span>
+                  <span className="tab-label">Templates</span>
                 </button>
               </div>
 
-              {emailSubView === 'list' ? (
-                /* Email List View */
-                <div className="email-layout">
-                  {/* Left Panel - Email List */}
-                  <div className="email-list-panel">
-                    <div className="panel-header">
-                      <h3>📋 Email List ({clinicsWithEmail.length})</h3>
-                      <div className="panel-header-actions">
-                        <label className="filter-toggle" title="Show/hide already sent">
+              {/* CONTACTS VIEW */}
+              {emailSubView === 'contacts' && (
+                <div className="contacts-view">
+                  {/* Add Contact Form */}
+                  <div className="add-contact-card">
+                    <h3>Add New Contact</h3>
+                    <div className="add-contact-form">
+                      <div className="form-row">
+                        <input
+                          type="text"
+                          placeholder="Contact Name"
+                          value={newCustomEmail.name}
+                          onChange={(e) => setNewCustomEmail(prev => ({ ...prev, name: e.target.value }))}
+                          className="form-input"
+                        />
+                        <input
+                          type="email"
+                          placeholder="Email Address"
+                          value={newCustomEmail.email}
+                          onChange={(e) => setNewCustomEmail(prev => ({ ...prev, email: e.target.value }))}
+                          className="form-input"
+                        />
+                        <input
+                          type="text"
+                          placeholder="City (optional)"
+                          value={newCustomEmail.city}
+                          onChange={(e) => setNewCustomEmail(prev => ({ ...prev, city: e.target.value }))}
+                          className="form-input"
+                        />
+                        <button 
+                          className="btn-add-contact"
+                          onClick={handleAddCustomEmail}
+                          disabled={!newCustomEmail.name || !newCustomEmail.email}
+                        >
+                          Add Contact
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Contacts List */}
+                  <div className="contacts-list-card">
+                    <div className="contacts-header">
+                      <h3>Contact List</h3>
+                      <div className="contacts-actions">
+                        <label className="filter-checkbox">
                           <input 
                             type="checkbox"
                             checked={showSentEmails}
@@ -1643,492 +1751,477 @@ function App() {
                           />
                           <span>Show sent</span>
                         </label>
+                        <button className="btn-select-all" onClick={selectAllWithEmail}>
+                          {selectedEmailClinics.length === clinicsWithEmail.length ? 'Deselect All' : 'Select All'}
+                        </button>
+                        {removedEmailIds.length > 0 && (
+                          <button className="btn-restore" onClick={handleClearRemoved}>
+                            Restore {removedEmailIds.length} removed
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {/* Add Custom Email Section */}
-                    <div className="add-custom-email">
-                      <div className="add-email-header">
-                        <span>➕ Add Email Manually</span>
-                      </div>
-                      <div className="add-email-form">
-                        <input
-                          type="text"
-                          placeholder="Clinic Name"
-                          value={newCustomEmail.name}
-                          onChange={(e) => setNewCustomEmail(prev => ({ ...prev, name: e.target.value }))}
-                          className="add-email-input"
-                        />
-                        <input
-                          type="email"
-                          placeholder="email@example.com"
-                          value={newCustomEmail.email}
-                          onChange={(e) => setNewCustomEmail(prev => ({ ...prev, email: e.target.value }))}
-                          className="add-email-input"
-                        />
-                        <input
-                          type="text"
-                          placeholder="City (optional)"
-                          value={newCustomEmail.city}
-                          onChange={(e) => setNewCustomEmail(prev => ({ ...prev, city: e.target.value }))}
-                          className="add-email-input"
-                        />
-                        <button 
-                          className="btn btn-sm btn-primary add-email-btn"
-                          onClick={handleAddCustomEmail}
-                        >
-                          Add
-                        </button>
-                      </div>
-                    </div>
-                    
                     {clinicsWithEmail.length === 0 ? (
-                      <div className="empty-email-list">
-                        <span className="empty-icon">📭</span>
-                        <p>No emails in list</p>
-                        <p className="text-muted">Add emails manually or scrape clinic websites</p>
+                      <div className="empty-contacts">
+                        <div className="empty-icon">📭</div>
+                        <h4>No contacts yet</h4>
+                        <p>Add contacts manually above or scrape clinic websites to find emails</p>
                       </div>
                     ) : (
-                      <>
-                        <div className="list-actions-bar">
-                          <button className="btn btn-sm btn-secondary" onClick={selectAllWithEmail}>
-                            {selectedEmailClinics.length === clinicsWithEmail.length ? 'Deselect All' : 'Select All'}
-                          </button>
-                          {removedEmailIds.length > 0 && (
-                            <button className="btn btn-sm btn-ghost" onClick={handleClearRemoved}>
-                              Restore {removedEmailIds.length} removed
-                            </button>
-                          )}
+                      <div className="contacts-table">
+                        <div className="table-header">
+                          <div className="col-check"></div>
+                          <div className="col-name">Name</div>
+                          <div className="col-email">Email</div>
+                          <div className="col-location">Location</div>
+                          <div className="col-status">Status</div>
+                          <div className="col-actions">Actions</div>
                         </div>
-                        <div className="email-clinic-list">
+                        <div className="table-body">
                           {clinicsWithEmail.map(clinic => (
                             <div 
                               key={clinic.clinic_id}
-                              className={`email-clinic-item ${selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id) ? 'selected' : ''} ${previewClinic?.clinic_id === clinic.clinic_id ? 'previewing' : ''} ${leadStatuses[clinic.clinic_id] === 'contacted' ? 'already-sent' : ''}`}
+                              className={`table-row ${selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id) ? 'selected' : ''} ${leadStatuses[clinic.clinic_id] === 'contacted' ? 'sent' : ''}`}
                             >
-                              <label className="clinic-checkbox">
+                              <div className="col-check">
                                 <input 
                                   type="checkbox"
                                   checked={!!selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id)}
                                   onChange={() => toggleClinicSelection(clinic)}
                                 />
-                              </label>
-                              <div className="clinic-email-info" onClick={() => handlePreviewEmail(clinic)}>
-                                <div className="clinic-email-name">
-                                  {clinic.clinic_name || clinic.name}
-                                  {clinic.isCustom && <span className="custom-badge">Manual</span>}
-                                </div>
-                                <div className="clinic-email-address">{clinic.email}</div>
-                                <div className="clinic-email-meta">
-                                  {clinic.city && <span>{clinic.city}</span>}
-                                  {clinic.rating && <span>⭐ {clinic.rating}</span>}
-                                  {leadStatuses[clinic.clinic_id] === 'contacted' && <span className="sent-badge">✓ Sent</span>}
-                                </div>
                               </div>
-                              <div className="clinic-email-actions">
+                              <div className="col-name">
+                                <span className="contact-name">{clinic.clinic_name || clinic.name}</span>
+                                {clinic.isCustom && <span className="badge-manual">Manual</span>}
+                              </div>
+                              <div className="col-email">{clinic.email}</div>
+                              <div className="col-location">{clinic.city || '—'}</div>
+                              <div className="col-status">
+                                {leadStatuses[clinic.clinic_id] === 'contacted' ? (
+                                  <span className="status-sent">✓ Sent</span>
+                                ) : (
+                                  <span className="status-pending">Pending</span>
+                                )}
+                              </div>
+                              <div className="col-actions">
                                 <button 
-                                  className="btn btn-sm btn-primary"
+                                  className="btn-icon btn-send"
                                   onClick={() => handleSendSingleEmail(clinic)}
                                   disabled={isSendingEmail || !emailStatus?.configured || leadStatuses[clinic.clinic_id] === 'contacted'}
-                                  title={leadStatuses[clinic.clinic_id] === 'contacted' ? 'Already sent' : 'Send email'}
+                                  title="Send email"
                                 >
                                   📤
                                 </button>
                                 <button 
-                                  className="btn btn-sm btn-ghost btn-remove"
+                                  className="btn-icon btn-remove"
                                   onClick={() => handleRemoveFromEmailList(clinic.clinic_id)}
-                                  title="Remove from list"
+                                  title="Remove"
                                 >
-                                  ✕
+                                  🗑️
                                 </button>
                               </div>
                             </div>
                           ))}
                         </div>
-                      </>
+                      </div>
                     )}
 
+                    {/* Bulk Actions Bar */}
                     {selectedEmailClinics.length > 0 && (
-                      <div className="bulk-send-bar">
-                        <span>{selectedEmailClinics.length} selected</span>
+                      <div className="bulk-actions-bar">
+                        <span className="bulk-count">{selectedEmailClinics.length} contacts selected</span>
                         <button 
-                          className="btn btn-primary"
+                          className="btn-bulk-send"
                           onClick={handleSendBulkEmails}
                           disabled={isSendingEmail || !emailStatus?.configured}
                         >
-                          {isSendingEmail ? 'Sending...' : `Send to ${selectedEmailClinics.length}`}
+                          {isSendingEmail ? 'Sending...' : `Send to ${selectedEmailClinics.length} contacts`}
                         </button>
                       </div>
                     )}
 
+                    {/* Progress Bar */}
                     {emailSendProgress && (
-                      <div className="send-progress">
-                        <div className="progress-bar">
+                      <div className="send-progress-bar">
+                        <div className="progress-track">
                           <div 
                             className="progress-fill"
                             style={{ width: `${(emailSendProgress.current / emailSendProgress.total) * 100}%` }}
                           />
                         </div>
-                        <span>{emailSendProgress.current} / {emailSendProgress.total} sent</span>
+                        <span className="progress-text">{emailSendProgress.current} / {emailSendProgress.total} sent</span>
                       </div>
                     )}
                   </div>
+                </div>
+              )}
 
-                  {/* Middle Panel - Template Editor */}
-                  <div className="email-editor-panel">
-                    <div className="panel-header">
-                      <h3>✏️ Email Template</h3>
-                      <div className="template-actions">
+              {/* COMPOSE VIEW */}
+              {emailSubView === 'compose' && (
+                <div className="compose-view">
+                  <div className="compose-grid">
+                    {/* Left Column - Recipient */}
+                    <div className="compose-recipient-card">
+                      <h3>Recipient</h3>
+                      <div className="recipient-form">
+                        <div className="form-field">
+                          <label>Email Address <span className="required">*</span></label>
+                          <input
+                            type="email"
+                            className="form-input"
+                            value={customEmailForm.recipientEmail}
+                            onChange={(e) => {
+                              setCustomEmailForm(prev => ({ ...prev, recipientEmail: e.target.value }));
+                              setTimeout(handlePreviewCustomEmail, 300);
+                            }}
+                            placeholder="contact@clinic.com"
+                          />
+                        </div>
+                        <div className="form-field">
+                          <label>Name</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={customEmailForm.recipientName}
+                            onChange={(e) => {
+                              setCustomEmailForm(prev => ({ ...prev, recipientName: e.target.value }));
+                              setTimeout(handlePreviewCustomEmail, 300);
+                            }}
+                            placeholder="Dr. John Smith"
+                          />
+                          <span className="field-hint">Used for {'{{owner_name}}'}</span>
+                        </div>
+                        <div className="form-field">
+                          <label>Clinic Name</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={customEmailForm.clinicName}
+                            onChange={(e) => {
+                              setCustomEmailForm(prev => ({ ...prev, clinicName: e.target.value }));
+                              setTimeout(handlePreviewCustomEmail, 300);
+                            }}
+                            placeholder="Bright Smile Dental"
+                          />
+                          <span className="field-hint">Used for {'{{clinic_name}}'}</span>
+                        </div>
+                        <div className="form-field">
+                          <label>City</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={customEmailForm.city}
+                            onChange={(e) => {
+                              setCustomEmailForm(prev => ({ ...prev, city: e.target.value }));
+                              setTimeout(handlePreviewCustomEmail, 300);
+                            }}
+                            placeholder="Miami, FL"
+                          />
+                          <span className="field-hint">Used for {'{{city}}'}</span>
+                        </div>
+                      </div>
+
+                      <div className="compose-actions">
+                        <button 
+                          className="btn-send-email"
+                          onClick={handleSendCustomEmail}
+                          disabled={isSendingEmail || !emailStatus?.configured || !customEmailForm.recipientEmail}
+                        >
+                          {isSendingEmail ? 'Sending...' : 'Send Email'}
+                        </button>
+                        <button 
+                          className="btn-clear"
+                          onClick={() => setCustomEmailForm({ recipientEmail: '', recipientName: '', clinicName: '', city: '' })}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Middle Column - Editor */}
+                    <div className="compose-editor-card">
+                      <div className="editor-header">
+                        <h3>Email Content</h3>
                         <select 
-                          className="template-select"
+                          className="template-dropdown"
                           value={selectedTemplate?.id || ''}
                           onChange={(e) => {
                             const t = emailTemplates.find(t => t.id === e.target.value);
                             if (t) handleLoadTemplate(t);
                           }}
                         >
+                          <option value="" disabled>Load template...</option>
                           {emailTemplates.map(t => (
                             <option key={t.id} value={t.id}>{t.name}</option>
                           ))}
                         </select>
-                        <button className="btn btn-sm btn-secondary" onClick={handleSaveTemplate}>
-                          💾 Save
+                      </div>
+
+                      <div className="editor-body">
+                        <div className="form-field">
+                          <label>Subject</label>
+                          <input
+                            type="text"
+                            className="form-input subject-input"
+                            value={emailSubject}
+                            onChange={(e) => {
+                              setEmailSubject(e.target.value);
+                              setTimeout(handlePreviewCustomEmail, 300);
+                            }}
+                            placeholder="Quick question for {{clinic_name}}"
+                          />
+                        </div>
+                        <div className="form-field">
+                          <label>Message</label>
+                          <textarea
+                            className="email-textarea"
+                            value={emailBody}
+                            onChange={(e) => {
+                              setEmailBody(e.target.value);
+                              setTimeout(handlePreviewCustomEmail, 300);
+                            }}
+                            placeholder="Write your email here..."
+                            rows={16}
+                          />
+                        </div>
+                        <div className="variable-buttons">
+                          <span className="var-label">Insert variable:</span>
+                          {['clinic_name', 'owner_name', 'city'].map(v => (
+                            <button 
+                              key={v}
+                              className="var-btn"
+                              onClick={() => setEmailBody(prev => prev + `{{${v}}}`)}
+                            >
+                              {v}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="editor-footer">
+                        <button className="btn-save-template" onClick={handleSaveTemplate}>
+                          Save as Template
                         </button>
                       </div>
                     </div>
 
-                    <div className="email-editor">
-                      <div className="form-group">
-                        <label>Subject Line</label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={emailSubject}
-                          onChange={(e) => setEmailSubject(e.target.value)}
-                          placeholder="Quick question for {{clinic_name}}"
-                        />
+                    {/* Right Column - Preview */}
+                    <div className="compose-preview-card">
+                      <h3>Preview</h3>
+                      <div className="preview-container">
+                        <div className="preview-header-info">
+                          <div className="preview-row">
+                            <span className="preview-label">To:</span>
+                            <span>{customEmailForm.recipientEmail || 'recipient@example.com'}</span>
+                          </div>
+                          <div className="preview-row">
+                            <span className="preview-label">From:</span>
+                            <span>{emailStatus?.fromEmail || 'your@email.com'}</span>
+                          </div>
+                          <div className="preview-row">
+                            <span className="preview-label">Subject:</span>
+                            <span className="preview-subject-text">
+                              {emailSubject
+                                .replace(/\{\{clinic_name\}\}/g, customEmailForm.clinicName || 'Clinic Name')
+                                .replace(/\{\{owner_name\}\}/g, customEmailForm.recipientName || 'there')
+                                .replace(/\{\{city\}\}/g, customEmailForm.city || 'City')}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="preview-body-content">
+                          {emailBody ? (
+                            <div dangerouslySetInnerHTML={{ 
+                              __html: emailBody
+                                .replace(/\{\{clinic_name\}\}/g, customEmailForm.clinicName || 'Clinic Name')
+                                .replace(/\{\{owner_name\}\}/g, customEmailForm.recipientName || 'there')
+                                .replace(/\{\{city\}\}/g, customEmailForm.city || 'City')
+                                .split('\n\n').map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')
+                            }} />
+                          ) : (
+                            <p className="preview-placeholder">Your email preview will appear here...</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="form-group">
-                        <label>Email Body <span className="label-hint">(plain text - line breaks will be preserved)</span></label>
-                        <textarea
-                          className="email-body-editor"
-                          value={emailBody}
-                          onChange={(e) => setEmailBody(e.target.value)}
-                          placeholder="Hi {{owner_name}},
 
-I came across {{clinic_name}} and wanted to reach out...
-
-Best regards,
-Your Name"
-                          rows={12}
-                        />
-                      </div>
-                      <div className="template-variables">
-                        <span className="var-label">Click to insert:</span>
-                        {['{{clinic_name}}', '{{owner_name}}', '{{city}}', '{{rating}}', '{{website}}'].map(v => (
+                      {/* Quick Test Send */}
+                      <div className="quick-test-section">
+                        <h4>Quick Test</h4>
+                        <div className="quick-test-form">
+                          <input
+                            type="email"
+                            className="form-input"
+                            value={testEmailAddress}
+                            onChange={(e) => setTestEmailAddress(e.target.value)}
+                            placeholder="Your email for testing..."
+                          />
                           <button 
-                            key={v}
-                            className="var-btn"
-                            onClick={() => setEmailBody(prev => prev + ' ' + v)}
+                            className="btn-test-send"
+                            onClick={handleSendTestEmail}
+                            disabled={isSendingEmail || !emailStatus?.configured || !testEmailAddress}
                           >
-                            {v.replace(/\{|\}/g, '')}
+                            Test
                           </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TEMPLATES VIEW */}
+              {emailSubView === 'templates' && (
+                <div className="templates-view">
+                  <div className="templates-grid">
+                    {/* Template List */}
+                    <div className="templates-list-card">
+                      <div className="templates-header">
+                        <h3>Saved Templates</h3>
+                        <button 
+                          className="btn-new-template"
+                          onClick={() => {
+                            setEditingTemplate({ id: '', name: 'New Template', subject: '', body: '' });
+                          }}
+                        >
+                          + New Template
+                        </button>
+                      </div>
+                      <div className="templates-list">
+                        {emailTemplates.map(template => (
+                          <div 
+                            key={template.id}
+                            className={`template-item ${editingTemplate?.id === template.id ? 'active' : ''}`}
+                            onClick={() => setEditingTemplate(template)}
+                          >
+                            <div className="template-info">
+                              <span className="template-name">{template.name}</span>
+                              <span className="template-preview">{template.subject}</span>
+                            </div>
+                            <button 
+                              className="btn-use-template"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLoadTemplate(template);
+                                setEmailSubView('compose');
+                              }}
+                            >
+                              Use
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </div>
 
-                    {/* Quick Send Section */}
-                    <div className="quick-send-section">
-                      <h4>📨 Quick Send</h4>
-                      <p className="quick-send-desc">Send a test to yourself or to any email address</p>
-                      <div className="quick-send-form">
-                        <input
-                          type="email"
-                          className="form-control"
-                          value={testEmailAddress}
-                          onChange={(e) => setTestEmailAddress(e.target.value)}
-                          placeholder="Enter any email address..."
-                        />
-                        <button 
-                          className="btn btn-primary"
-                          onClick={handleSendTestEmail}
-                          disabled={isSendingEmail || !emailStatus?.configured || !testEmailAddress}
-                        >
-                          {isSendingEmail ? 'Sending...' : 'Send →'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Panel - Preview */}
-                  <div className="email-preview-panel">
-                    <div className="panel-header">
-                      <h3>👁️ Live Preview</h3>
-                      {previewClinic && (
-                        <span className="preview-for">for {previewClinic.clinic_name || previewClinic.name}</span>
-                      )}
-                    </div>
-                    
-                    <div className="email-preview">
-                      {previewHtml ? (
-                        <div className="preview-content">
-                          <div className="preview-meta">
-                            <div className="preview-meta-row">
-                              <span className="preview-label">To:</span>
-                              <span>{previewClinic?.email}</span>
+                    {/* Template Editor */}
+                    <div className="template-editor-card">
+                      {editingTemplate ? (
+                        <>
+                          <div className="template-editor-header">
+                            <h3>Edit Template</h3>
+                          </div>
+                          <div className="template-editor-body">
+                            <div className="form-field">
+                              <label>Template Name</label>
+                              <input
+                                type="text"
+                                className="form-input"
+                                value={editingTemplate.name}
+                                onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, name: e.target.value } : null)}
+                                placeholder="My Template"
+                              />
                             </div>
-                            <div className="preview-meta-row">
-                              <span className="preview-label">From:</span>
-                              <span>{emailStatus?.fromEmail || 'founder@dentsignal.me'}</span>
+                            <div className="form-field">
+                              <label>Subject Line</label>
+                              <input
+                                type="text"
+                                className="form-input"
+                                value={editingTemplate.subject}
+                                onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, subject: e.target.value } : null)}
+                                placeholder="Email subject..."
+                              />
                             </div>
-                            <div className="preview-meta-row">
-                              <span className="preview-label">Subject:</span>
-                              <span className="preview-subject">{emailSubject.replace(/\{\{clinic_name\}\}/g, previewClinic?.clinic_name || previewClinic?.name || 'Clinic')}</span>
+                            <div className="form-field">
+                              <label>Email Body</label>
+                              <textarea
+                                className="email-textarea"
+                                value={editingTemplate.body}
+                                onChange={(e) => setEditingTemplate(prev => prev ? { ...prev, body: e.target.value } : null)}
+                                placeholder="Email content..."
+                                rows={14}
+                              />
+                            </div>
+                            <div className="variable-buttons">
+                              <span className="var-label">Variables:</span>
+                              {['clinic_name', 'owner_name', 'city', 'rating', 'website'].map(v => (
+                                <button 
+                                  key={v}
+                                  className="var-btn"
+                                  onClick={() => setEditingTemplate(prev => prev ? { ...prev, body: prev.body + `{{${v}}}` } : null)}
+                                >
+                                  {v}
+                                </button>
+                              ))}
                             </div>
                           </div>
-                          <div 
-                            className="preview-body"
-                            dangerouslySetInnerHTML={{ __html: previewHtml }}
-                          />
-                        </div>
+                          <div className="template-editor-footer">
+                            <button 
+                              className="btn-save-template"
+                              onClick={() => {
+                                if (editingTemplate) {
+                                  const updatedTemplates = editingTemplate.id 
+                                    ? emailTemplates.map(t => t.id === editingTemplate.id ? editingTemplate : t)
+                                    : [...emailTemplates, { ...editingTemplate, id: Date.now().toString() }];
+                                  setEmailTemplates(updatedTemplates);
+                                  showToast('Template saved!', 'success');
+                                }
+                              }}
+                            >
+                              Save Template
+                            </button>
+                            {editingTemplate.id && (
+                              <button 
+                                className="btn-delete-template"
+                                onClick={() => {
+                                  setEmailTemplates(prev => prev.filter(t => t.id !== editingTemplate.id));
+                                  setEditingTemplate(null);
+                                  showToast('Template deleted', 'info');
+                                }}
+                              >
+                                Delete
+                              </button>
+                            )}
+                            <button 
+                              className="btn-cancel"
+                              onClick={() => setEditingTemplate(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </>
                       ) : (
-                        <div className="preview-empty">
-                          <span className="preview-icon">👈</span>
-                          <p>Select a contact to preview the personalized email</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Mailgun Status */}
-                    <div className="mailgun-status">
-                      <div className="status-header">
-                        <span className={`status-dot-large ${emailStatus?.configured ? 'online' : 'offline'}`}></span>
-                        <span className="status-text">{emailStatus?.configured ? 'Mailgun Connected' : 'Not Connected'}</span>
-                      </div>
-                      {emailStatus?.configured && (
-                        <div className="status-details">
-                          <div><span className="dim">Domain:</span> {emailStatus.domain}</div>
-                          <div><span className="dim">From:</span> {emailStatus.fromEmail}</div>
+                        <div className="no-template-selected">
+                          <div className="empty-state-icon">📋</div>
+                          <h4>Select a template to edit</h4>
+                          <p>Or create a new one using the button above</p>
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
-              ) : (
-                /* Custom Email View */
-                <div className="custom-email-layout">
-                  {/* Left - Recipient Details */}
-                  <div className="custom-email-form-panel">
-                    <div className="panel-header">
-                      <h3>👤 Recipient Details</h3>
-                    </div>
-                    <div className="custom-form-body">
-                      <div className="form-group">
-                        <label>Recipient Email <span className="required">*</span></label>
-                        <input
-                          type="email"
-                          className="form-control"
-                          value={customEmailForm.recipientEmail}
-                          onChange={(e) => {
-                            setCustomEmailForm(prev => ({ ...prev, recipientEmail: e.target.value }));
-                            // Auto-preview when email changes
-                            setTimeout(handlePreviewCustomEmail, 300);
-                          }}
-                          placeholder="contact@dentalclinic.com"
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Recipient Name <span className="optional">(for personalization)</span></label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={customEmailForm.recipientName}
-                          onChange={(e) => {
-                            setCustomEmailForm(prev => ({ ...prev, recipientName: e.target.value }));
-                            setTimeout(handlePreviewCustomEmail, 300);
-                          }}
-                          placeholder="Dr. John Smith"
-                        />
-                        <span className="input-hint">Used for {'{'}{'{'} owner_name {'}'}{'}'} variable</span>
-                      </div>
-                      <div className="form-group">
-                        <label>Clinic Name <span className="optional">(for personalization)</span></label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={customEmailForm.clinicName}
-                          onChange={(e) => {
-                            setCustomEmailForm(prev => ({ ...prev, clinicName: e.target.value }));
-                            setTimeout(handlePreviewCustomEmail, 300);
-                          }}
-                          placeholder="Bright Smile Dental"
-                        />
-                        <span className="input-hint">Used for {'{'}{'{'} clinic_name {'}'}{'}'} variable</span>
-                      </div>
-                      <div className="form-group">
-                        <label>City <span className="optional">(for personalization)</span></label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={customEmailForm.city}
-                          onChange={(e) => {
-                            setCustomEmailForm(prev => ({ ...prev, city: e.target.value }));
-                            setTimeout(handlePreviewCustomEmail, 300);
-                          }}
-                          placeholder="Miami, FL"
-                        />
-                        <span className="input-hint">Used for {'{'}{'{'} city {'}'}{'}'} variable</span>
-                      </div>
+              )}
 
-                      <div className="custom-form-actions">
-                        <button 
-                          className="btn btn-lg btn-primary send-custom-btn"
-                          onClick={handleSendCustomEmail}
-                          disabled={isSendingEmail || !emailStatus?.configured || !customEmailForm.recipientEmail}
-                        >
-                          {isSendingEmail ? (
-                            <>⏳ Sending...</>
-                          ) : (
-                            <>📤 Send Email</>
-                          )}
-                        </button>
-                        <button 
-                          className="btn btn-secondary"
-                          onClick={() => setCustomEmailForm({ recipientEmail: '', recipientName: '', clinicName: '', city: '' })}
-                        >
-                          Clear Form
-                        </button>
-                      </div>
+              {/* Mailgun Setup Banner (only show if not configured) */}
+              {!emailStatus?.configured && (
+                <div className="setup-banner">
+                  <div className="setup-banner-content">
+                    <span className="setup-icon">⚠️</span>
+                    <div className="setup-text">
+                      <strong>Mailgun Setup Required</strong>
+                      <p>Configure MAILGUN_API_KEY, MAILGUN_DOMAIN, and MAILGUN_FROM_EMAIL to send emails</p>
                     </div>
-                  </div>
-
-                  {/* Middle - Template */}
-                  <div className="email-editor-panel">
-                    <div className="panel-header">
-                      <h3>✏️ Email Template</h3>
-                      <div className="template-actions">
-                        <select 
-                          className="template-select"
-                          value={selectedTemplate?.id || ''}
-                          onChange={(e) => {
-                            const t = emailTemplates.find(t => t.id === e.target.value);
-                            if (t) handleLoadTemplate(t);
-                          }}
-                        >
-                          {emailTemplates.map(t => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="email-editor">
-                      <div className="form-group">
-                        <label>Subject Line</label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={emailSubject}
-                          onChange={(e) => {
-                            setEmailSubject(e.target.value);
-                            setTimeout(handlePreviewCustomEmail, 300);
-                          }}
-                          placeholder="Quick question for {{clinic_name}}"
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>Email Body</label>
-                        <textarea
-                          className="email-body-editor"
-                          value={emailBody}
-                          onChange={(e) => {
-                            setEmailBody(e.target.value);
-                            setTimeout(handlePreviewCustomEmail, 300);
-                          }}
-                          placeholder="Hi {{owner_name}},
-
-I came across {{clinic_name}} and wanted to reach out...
-
-Best regards,
-Your Name"
-                          rows={14}
-                        />
-                      </div>
-                      <div className="template-variables">
-                        <span className="var-label">Click to insert:</span>
-                        {['{{clinic_name}}', '{{owner_name}}', '{{city}}'].map(v => (
-                          <button 
-                            key={v}
-                            className="var-btn"
-                            onClick={() => setEmailBody(prev => prev + ' ' + v)}
-                          >
-                            {v.replace(/\{|\}/g, '')}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right - Preview */}
-                  <div className="email-preview-panel">
-                    <div className="panel-header">
-                      <h3>👁️ Live Preview</h3>
-                    </div>
-                    
-                    <div className="email-preview">
-                      {previewHtml || customEmailForm.recipientEmail ? (
-                        <div className="preview-content">
-                          <div className="preview-meta">
-                            <div className="preview-meta-row">
-                              <span className="preview-label">To:</span>
-                              <span>{customEmailForm.recipientEmail || 'recipient@example.com'}</span>
-                            </div>
-                            <div className="preview-meta-row">
-                              <span className="preview-label">From:</span>
-                              <span>{emailStatus?.fromEmail || 'founder@dentsignal.me'}</span>
-                            </div>
-                            <div className="preview-meta-row">
-                              <span className="preview-label">Subject:</span>
-                              <span className="preview-subject">
-                                {emailSubject
-                                  .replace(/\{\{clinic_name\}\}/g, customEmailForm.clinicName || 'Your Clinic')
-                                  .replace(/\{\{owner_name\}\}/g, customEmailForm.recipientName || 'there')
-                                  .replace(/\{\{city\}\}/g, customEmailForm.city || 'your city')}
-                              </span>
-                            </div>
-                          </div>
-                          <div 
-                            className="preview-body"
-                            dangerouslySetInnerHTML={{ 
-                              __html: previewHtml || emailBody
-                                .replace(/\{\{clinic_name\}\}/g, customEmailForm.clinicName || 'Your Clinic')
-                                .replace(/\{\{owner_name\}\}/g, customEmailForm.recipientName || 'there')
-                                .replace(/\{\{city\}\}/g, customEmailForm.city || 'your city')
-                                .split('\n\n').map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('')
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="preview-empty">
-                          <span className="preview-icon">✨</span>
-                          <p>Fill in recipient details to see the personalized preview</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Mailgun Status */}
-                    <div className="mailgun-status">
-                      <div className="status-header">
-                        <span className={`status-dot-large ${emailStatus?.configured ? 'online' : 'offline'}`}></span>
-                        <span className="status-text">{emailStatus?.configured ? 'Mailgun Connected' : 'Not Connected'}</span>
-                      </div>
-                      {emailStatus?.configured && (
-                        <div className="status-details">
-                          <div><span className="dim">Domain:</span> {emailStatus.domain}</div>
-                          <div><span className="dim">From:</span> {emailStatus.fromEmail}</div>
-                        </div>
-                      )}
-                    </div>
+                    <a href="https://app.mailgun.com" target="_blank" rel="noopener noreferrer" className="setup-link">
+                      Get API Key →
+                    </a>
                   </div>
                 </div>
               )}

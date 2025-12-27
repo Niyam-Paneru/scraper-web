@@ -51,3 +51,6 @@ dental_prospects_*.csv
 # Misc
 *.pem
 .cache
+
+# Playwright
+.playwright-mcp/
