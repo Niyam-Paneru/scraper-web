@@ -81,6 +81,16 @@ function App() {
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailSendProgress, setEmailSendProgress] = useState(null);
   const [selectedEmailClinics, setSelectedEmailClinics] = useState([]);
+  const [customEmails, setCustomEmails] = useState(() => {
+    const saved = localStorage.getItem('customEmails');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [newCustomEmail, setNewCustomEmail] = useState({ name: '', email: '', city: '' });
+  const [removedEmailIds, setRemovedEmailIds] = useState(() => {
+    const saved = localStorage.getItem('removedEmailIds');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showSentEmails, setShowSentEmails] = useState(true);
 
   // Apply theme to document
   useEffect(() => {
@@ -114,6 +124,16 @@ function App() {
   useEffect(() => {
     localStorage.setItem('chatHistories', JSON.stringify(chatHistories));
   }, [chatHistories]);
+
+  // Save custom emails to localStorage
+  useEffect(() => {
+    localStorage.setItem('customEmails', JSON.stringify(customEmails));
+  }, [customEmails]);
+
+  // Save removed email IDs to localStorage
+  useEffect(() => {
+    localStorage.setItem('removedEmailIds', JSON.stringify(removedEmailIds));
+  }, [removedEmailIds]);
 
   // Lead management functions
   const updateLeadStatus = (clinicId, status) => {
@@ -675,8 +695,79 @@ function App() {
 
   // Email Campaign Functions
   
-  // Get clinics with emails
-  const clinicsWithEmail = currentJob?.results?.filter(c => c.email) || [];
+  // Get clinics with emails (filtered by removed and optionally by sent status)
+  const scrapedClinicsWithEmail = currentJob?.results?.filter(c => 
+    c.email && 
+    !removedEmailIds.includes(c.clinic_id) &&
+    (showSentEmails || leadStatuses[c.clinic_id] !== 'contacted')
+  ) || [];
+  
+  // Combine scraped clinics with custom emails
+  const allEmailContacts = [
+    ...scrapedClinicsWithEmail,
+    ...customEmails.filter(c => 
+      !removedEmailIds.includes(c.clinic_id) &&
+      (showSentEmails || leadStatuses[c.clinic_id] !== 'contacted')
+    )
+  ];
+  
+  // For backward compatibility
+  const clinicsWithEmail = allEmailContacts;
+
+  // Add custom email to list
+  const handleAddCustomEmail = () => {
+    if (!newCustomEmail.email || !newCustomEmail.name) {
+      showToast('Enter both name and email', 'error');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newCustomEmail.email)) {
+      showToast('Invalid email format', 'error');
+      return;
+    }
+    // Check for duplicate
+    const exists = [...scrapedClinicsWithEmail, ...customEmails].find(
+      c => c.email.toLowerCase() === newCustomEmail.email.toLowerCase()
+    );
+    if (exists) {
+      showToast('This email already exists', 'warning');
+      return;
+    }
+    
+    const newContact = {
+      clinic_id: `custom_${Date.now()}`,
+      clinic_name: newCustomEmail.name,
+      name: newCustomEmail.name,
+      email: newCustomEmail.email,
+      city: newCustomEmail.city || '',
+      isCustom: true,
+      addedAt: new Date().toISOString()
+    };
+    
+    setCustomEmails(prev => [...prev, newContact]);
+    setNewCustomEmail({ name: '', email: '', city: '' });
+    showToast('Email added to list', 'success');
+  };
+
+  // Remove email from list (hide it)
+  const handleRemoveFromEmailList = (clinicId) => {
+    setRemovedEmailIds(prev => [...prev, clinicId]);
+    setSelectedEmailClinics(prev => prev.filter(c => c.clinic_id !== clinicId));
+    showToast('Removed from list', 'info');
+  };
+
+  // Restore removed email
+  const handleRestoreEmail = (clinicId) => {
+    setRemovedEmailIds(prev => prev.filter(id => id !== clinicId));
+    showToast('Restored to list', 'success');
+  };
+
+  // Clear all removed (reset)
+  const handleClearRemoved = () => {
+    if (confirm('Restore all removed emails to the list?')) {
+      setRemovedEmailIds([]);
+      showToast('All emails restored', 'success');
+    }
+  };
   
   // Preview email for a clinic
   const handlePreviewEmail = async (clinic) => {
@@ -1440,56 +1531,119 @@ function App() {
                 {/* Left Panel - Email List */}
                 <div className="email-list-panel">
                   <div className="panel-header">
-                    <h3>📋 Clinics with Email ({clinicsWithEmail.length})</h3>
-                    {clinicsWithEmail.length > 0 && (
-                      <button className="btn btn-sm btn-secondary" onClick={selectAllWithEmail}>
-                        {selectedEmailClinics.length === clinicsWithEmail.length ? 'Deselect All' : 'Select All'}
+                    <h3>📋 Email List ({clinicsWithEmail.length})</h3>
+                    <div className="panel-header-actions">
+                      <label className="filter-toggle" title="Show/hide already sent">
+                        <input 
+                          type="checkbox"
+                          checked={showSentEmails}
+                          onChange={() => setShowSentEmails(!showSentEmails)}
+                        />
+                        <span>Show sent</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Add Custom Email Section */}
+                  <div className="add-custom-email">
+                    <div className="add-email-header">
+                      <span>➕ Add Email Manually</span>
+                    </div>
+                    <div className="add-email-form">
+                      <input
+                        type="text"
+                        placeholder="Clinic Name"
+                        value={newCustomEmail.name}
+                        onChange={(e) => setNewCustomEmail(prev => ({ ...prev, name: e.target.value }))}
+                        className="add-email-input"
+                      />
+                      <input
+                        type="email"
+                        placeholder="email@example.com"
+                        value={newCustomEmail.email}
+                        onChange={(e) => setNewCustomEmail(prev => ({ ...prev, email: e.target.value }))}
+                        className="add-email-input"
+                      />
+                      <input
+                        type="text"
+                        placeholder="City (optional)"
+                        value={newCustomEmail.city}
+                        onChange={(e) => setNewCustomEmail(prev => ({ ...prev, city: e.target.value }))}
+                        className="add-email-input"
+                      />
+                      <button 
+                        className="btn btn-sm btn-primary add-email-btn"
+                        onClick={handleAddCustomEmail}
+                      >
+                        Add
                       </button>
-                    )}
+                    </div>
                   </div>
                   
                   {clinicsWithEmail.length === 0 ? (
                     <div className="empty-email-list">
                       <span className="empty-icon">📭</span>
-                      <p>No clinics with emails yet</p>
-                      <p className="text-muted">Scrape clinic websites to find emails</p>
+                      <p>No emails in list</p>
+                      <p className="text-muted">Add emails manually or scrape clinic websites</p>
                     </div>
                   ) : (
-                    <div className="email-clinic-list">
-                      {clinicsWithEmail.map(clinic => (
-                        <div 
-                          key={clinic.clinic_id}
-                          className={`email-clinic-item ${selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id) ? 'selected' : ''} ${previewClinic?.clinic_id === clinic.clinic_id ? 'previewing' : ''}`}
-                        >
-                          <label className="clinic-checkbox">
-                            <input 
-                              type="checkbox"
-                              checked={!!selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id)}
-                              onChange={() => toggleClinicSelection(clinic)}
-                            />
-                          </label>
-                          <div className="clinic-email-info" onClick={() => handlePreviewEmail(clinic)}>
-                            <div className="clinic-email-name">{clinic.clinic_name || clinic.name}</div>
-                            <div className="clinic-email-address">{clinic.email}</div>
-                            <div className="clinic-email-meta">
-                              {clinic.city && <span>{clinic.city}</span>}
-                              {clinic.rating && <span>⭐ {clinic.rating}</span>}
-                              {leadStatuses[clinic.clinic_id] === 'contacted' && <span className="sent-badge">✓ Sent</span>}
+                    <>
+                      <div className="list-actions-bar">
+                        <button className="btn btn-sm btn-secondary" onClick={selectAllWithEmail}>
+                          {selectedEmailClinics.length === clinicsWithEmail.length ? 'Deselect All' : 'Select All'}
+                        </button>
+                        {removedEmailIds.length > 0 && (
+                          <button className="btn btn-sm btn-ghost" onClick={handleClearRemoved}>
+                            Restore {removedEmailIds.length} removed
+                          </button>
+                        )}
+                      </div>
+                      <div className="email-clinic-list">
+                        {clinicsWithEmail.map(clinic => (
+                          <div 
+                            key={clinic.clinic_id}
+                            className={`email-clinic-item ${selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id) ? 'selected' : ''} ${previewClinic?.clinic_id === clinic.clinic_id ? 'previewing' : ''} ${leadStatuses[clinic.clinic_id] === 'contacted' ? 'already-sent' : ''}`}
+                          >
+                            <label className="clinic-checkbox">
+                              <input 
+                                type="checkbox"
+                                checked={!!selectedEmailClinics.find(c => c.clinic_id === clinic.clinic_id)}
+                                onChange={() => toggleClinicSelection(clinic)}
+                              />
+                            </label>
+                            <div className="clinic-email-info" onClick={() => handlePreviewEmail(clinic)}>
+                              <div className="clinic-email-name">
+                                {clinic.clinic_name || clinic.name}
+                                {clinic.isCustom && <span className="custom-badge">Manual</span>}
+                              </div>
+                              <div className="clinic-email-address">{clinic.email}</div>
+                              <div className="clinic-email-meta">
+                                {clinic.city && <span>{clinic.city}</span>}
+                                {clinic.rating && <span>⭐ {clinic.rating}</span>}
+                                {leadStatuses[clinic.clinic_id] === 'contacted' && <span className="sent-badge">✓ Sent</span>}
+                              </div>
+                            </div>
+                            <div className="clinic-email-actions">
+                              <button 
+                                className="btn btn-sm btn-primary"
+                                onClick={() => handleSendSingleEmail(clinic)}
+                                disabled={isSendingEmail || !emailStatus?.configured || leadStatuses[clinic.clinic_id] === 'contacted'}
+                                title={leadStatuses[clinic.clinic_id] === 'contacted' ? 'Already sent' : 'Send email'}
+                              >
+                                📤
+                              </button>
+                              <button 
+                                className="btn btn-sm btn-ghost btn-remove"
+                                onClick={() => handleRemoveFromEmailList(clinic.clinic_id)}
+                                title="Remove from list"
+                              >
+                                ✕
+                              </button>
                             </div>
                           </div>
-                          <div className="clinic-email-actions">
-                            <button 
-                              className="btn btn-sm btn-primary"
-                              onClick={() => handleSendSingleEmail(clinic)}
-                              disabled={isSendingEmail || !emailStatus?.configured}
-                              title="Send email to this clinic"
-                            >
-                              📤
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    </>
                   )}
 
                   {selectedEmailClinics.length > 0 && (
@@ -1500,7 +1654,7 @@ function App() {
                         onClick={handleSendBulkEmails}
                         disabled={isSendingEmail || !emailStatus?.configured}
                       >
-                        {isSendingEmail ? 'Sending...' : `Send to ${selectedEmailClinics.length} Clinics`}
+                        {isSendingEmail ? 'Sending...' : `Send to ${selectedEmailClinics.length}`}
                       </button>
                     </div>
                   )}
@@ -1553,52 +1707,61 @@ function App() {
                       />
                     </div>
                     <div className="form-group">
-                      <label>Email Body (HTML)</label>
+                      <label>Email Body <span className="label-hint">(plain text - line breaks will be preserved)</span></label>
                       <textarea
                         className="email-body-editor"
                         value={emailBody}
                         onChange={(e) => setEmailBody(e.target.value)}
-                        placeholder="Write your email template here..."
-                        rows={15}
+                        placeholder="Hi {{owner_name}},
+
+I came across {{clinic_name}} and wanted to reach out...
+
+Best regards,
+Your Name"
+                        rows={12}
                       />
                     </div>
                     <div className="template-variables">
-                      <span className="var-label">Variables:</span>
-                      <code>{'{{clinic_name}}'}</code>
-                      <code>{'{{owner_name}}'}</code>
-                      <code>{'{{city}}'}</code>
-                      <code>{'{{rating}}'}</code>
-                      <code>{'{{website}}'}</code>
+                      <span className="var-label">Click to insert:</span>
+                      {['{{clinic_name}}', '{{owner_name}}', '{{city}}', '{{rating}}', '{{website}}'].map(v => (
+                        <button 
+                          key={v}
+                          className="var-btn"
+                          onClick={() => setEmailBody(prev => prev + ' ' + v)}
+                        >
+                          {v.replace(/\{|\}/g, '')}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Test Send Section */}
-                  <div className="test-send-section">
-                    <h4>🧪 Test Email</h4>
-                    <div className="test-send-form">
+                  {/* Quick Send Section */}
+                  <div className="quick-send-section">
+                    <h4>📨 Quick Send</h4>
+                    <p className="quick-send-desc">Send a test to yourself or to any email address</p>
+                    <div className="quick-send-form">
                       <input
                         type="email"
                         className="form-control"
                         value={testEmailAddress}
                         onChange={(e) => setTestEmailAddress(e.target.value)}
-                        placeholder="your@email.com"
+                        placeholder="Enter any email address..."
                       />
                       <button 
-                        className="btn btn-secondary"
+                        className="btn btn-primary"
                         onClick={handleSendTestEmail}
-                        disabled={isSendingEmail || !emailStatus?.configured}
+                        disabled={isSendingEmail || !emailStatus?.configured || !testEmailAddress}
                       >
-                        {isSendingEmail ? 'Sending...' : 'Send Test'}
+                        {isSendingEmail ? 'Sending...' : 'Send →'}
                       </button>
                     </div>
-                    <p className="test-hint">Send a test email to yourself before sending to real clinics</p>
                   </div>
                 </div>
 
                 {/* Right Panel - Preview */}
                 <div className="email-preview-panel">
                   <div className="panel-header">
-                    <h3>👁️ Preview</h3>
+                    <h3>👁️ Live Preview</h3>
                     {previewClinic && (
                       <span className="preview-for">for {previewClinic.clinic_name || previewClinic.name}</span>
                     )}
@@ -1608,8 +1771,18 @@ function App() {
                     {previewHtml ? (
                       <div className="preview-content">
                         <div className="preview-meta">
-                          <div><strong>To:</strong> {previewClinic?.email}</div>
-                          <div><strong>From:</strong> {emailStatus?.fromEmail || 'founder@dentsignal.me'}</div>
+                          <div className="preview-meta-row">
+                            <span className="preview-label">To:</span>
+                            <span>{previewClinic?.email}</span>
+                          </div>
+                          <div className="preview-meta-row">
+                            <span className="preview-label">From:</span>
+                            <span>{emailStatus?.fromEmail || 'founder@dentsignal.me'}</span>
+                          </div>
+                          <div className="preview-meta-row">
+                            <span className="preview-label">Subject:</span>
+                            <span className="preview-subject">{emailSubject.replace(/\{\{clinic_name\}\}/g, previewClinic?.clinic_name || previewClinic?.name || 'Clinic')}</span>
+                          </div>
                         </div>
                         <div 
                           className="preview-body"
@@ -1618,33 +1791,24 @@ function App() {
                       </div>
                     ) : (
                       <div className="preview-empty">
-                        <span className="preview-icon">👆</span>
-                        <p>Click on a clinic to preview how the email will look</p>
+                        <span className="preview-icon">👈</span>
+                        <p>Select a contact to preview the personalized email</p>
                       </div>
                     )}
                   </div>
 
                   {/* Mailgun Status */}
                   <div className="mailgun-status">
-                    <h4>📊 Mailgun Status</h4>
-                    <div className="status-grid">
-                      <div className="status-item">
-                        <span className={`status-indicator ${emailStatus?.configured ? 'online' : 'offline'}`}></span>
-                        <span>{emailStatus?.configured ? 'Connected' : 'Not configured'}</span>
-                      </div>
-                      {emailStatus?.domain && (
-                        <div className="status-item">
-                          <span className="status-label">Domain:</span>
-                          <span>{emailStatus.domain}</span>
-                        </div>
-                      )}
-                      {emailStatus?.fromEmail && (
-                        <div className="status-item">
-                          <span className="status-label">From:</span>
-                          <span>{emailStatus.fromEmail}</span>
-                        </div>
-                      )}
+                    <div className="status-header">
+                      <span className={`status-dot-large ${emailStatus?.configured ? 'online' : 'offline'}`}></span>
+                      <span className="status-text">{emailStatus?.configured ? 'Mailgun Connected' : 'Not Connected'}</span>
                     </div>
+                    {emailStatus?.configured && (
+                      <div className="status-details">
+                        <div><span className="dim">Domain:</span> {emailStatus.domain}</div>
+                        <div><span className="dim">From:</span> {emailStatus.fromEmail}</div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

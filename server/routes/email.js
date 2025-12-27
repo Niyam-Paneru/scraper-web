@@ -14,21 +14,37 @@ let emailTemplates = [
     id: 'default',
     name: 'Introduction Template',
     subject: 'Quick question for {{clinic_name}}',
-    html: `<p>Hi {{owner_name}},</p>
+    html: `Hi {{owner_name}},
 
-<p>I came across {{clinic_name}} while researching dental practices in {{city}}, and I was impressed by your {{rating}} rating.</p>
+I came across {{clinic_name}} while researching dental practices in {{city}}, and I was impressed by your {{rating}} rating.
 
-<p>I'm reaching out because we help dental clinics like yours [YOUR VALUE PROPOSITION HERE].</p>
+I'm reaching out because we help dental clinics like yours [YOUR VALUE PROPOSITION HERE].
 
-<p>Would you be open to a quick 10-minute call this week to see if it might be a fit?</p>
+Would you be open to a quick 10-minute call this week to see if it might be a fit?
 
-<p>Best regards,<br>
-[YOUR NAME]<br>
-[YOUR COMPANY]</p>
+Best regards,
+[YOUR NAME]
+[YOUR COMPANY]
 
-<p style="font-size: 12px; color: #666;">
-If you'd prefer not to receive emails from us, just reply with "unsubscribe" and we'll remove you immediately.
-</p>`,
+---
+If you'd prefer not to receive emails from us, just reply with "unsubscribe".`,
+    text: '',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'follow-up',
+    name: 'Follow-up Template',
+    subject: 'Following up - {{clinic_name}}',
+    html: `Hi {{owner_name}},
+
+I wanted to follow up on my previous email about {{clinic_name}}.
+
+I know you're busy running your practice, so I'll keep this brief - we've helped dental clinics in {{city}} [SPECIFIC BENEFIT].
+
+Would a quick 10-minute chat work this week?
+
+Best,
+[YOUR NAME]`,
     text: '',
     createdAt: new Date().toISOString()
   }
@@ -134,7 +150,10 @@ router.post('/preview', (req, res) => {
   }
 
   const personalizedSubject = mailgunService.personalizeTemplate(subject, clinic || {});
-  const personalizedHtml = mailgunService.personalizeTemplate(html, clinic || {});
+  let personalizedHtml = mailgunService.personalizeTemplate(html, clinic || {});
+  
+  // Convert plain text to HTML for preview
+  personalizedHtml = mailgunService.textToHtml(personalizedHtml);
 
   res.json({
     subject: personalizedSubject,

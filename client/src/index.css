@@ -2258,6 +2258,254 @@ body {
   color: var(--text-tertiary);
 }
 
+/* Add Custom Email Section */
+.add-custom-email {
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.add-email-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.add-email-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+}
+
+.add-email-input {
+  padding: 8px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.add-email-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.add-email-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.add-email-btn {
+  white-space: nowrap;
+}
+
+/* Filter & Actions Bar */
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.filter-toggle input {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.list-actions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+/* Custom & Remove Badges */
+.custom-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: var(--purple-light);
+  color: var(--purple);
+  border-radius: var(--radius-sm);
+}
+
+.btn-remove {
+  color: var(--text-tertiary);
+  padding: 4px 8px !important;
+}
+
+.btn-remove:hover {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.clinic-email-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* Already Sent Styling */
+.email-clinic-item.already-sent {
+  opacity: 0.6;
+}
+
+.email-clinic-item.already-sent .clinic-email-name {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+/* Quick Send Section */
+.quick-send-section {
+  padding: 16px;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+.quick-send-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.quick-send-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+}
+
+.quick-send-form {
+  display: flex;
+  gap: 10px;
+}
+
+.quick-send-form .form-control {
+  flex: 1;
+}
+
+/* Variable Buttons */
+.var-btn {
+  padding: 4px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--purple);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.var-btn:hover {
+  background: var(--purple-light);
+  border-color: var(--purple);
+}
+
+/* Label Hint */
+.label-hint {
+  font-weight: normal;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* Preview Meta Improvements */
+.preview-meta-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.preview-meta-row:last-child {
+  margin-bottom: 0;
+}
+
+.preview-label {
+  color: var(--text-tertiary);
+  min-width: 50px;
+}
+
+.preview-subject {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Mailgun Status Redesign */
+.mailgun-status {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.status-dot-large {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.status-dot-large.online {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-light);
+}
+
+.status-dot-large.offline {
+  background: var(--danger);
+}
+
+.status-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.status-details {
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-details .dim {
+  color: var(--text-tertiary);
+}
+
+/* Ghost Button */
+.btn-ghost {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
   .email-layout {
@@ -2272,5 +2520,9 @@ body {
   
   .email-preview-panel {
     max-height: 400px;
+  }
+  
+  .add-email-form {
+    grid-template-columns: 1fr;
   }
 }

@@ -67,6 +67,21 @@ class MailgunService {
   }
 
   /**
+   * Convert plain text to HTML (preserve line breaks)
+   */
+  textToHtml(text) {
+    // If already has HTML tags, return as-is
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      return text;
+    }
+    // Convert plain text to HTML with paragraphs
+    return text
+      .split('\n\n')
+      .map(para => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+      .join('\n');
+  }
+
+  /**
    * Send a single email
    */
   async sendEmail({ to, subject, html, text, clinic = {} }) {
@@ -76,8 +91,11 @@ class MailgunService {
 
     // Personalize content
     const personalizedSubject = this.personalizeTemplate(subject, clinic);
-    const personalizedHtml = this.personalizeTemplate(html, clinic);
+    let personalizedHtml = this.personalizeTemplate(html, clinic);
     const personalizedText = text ? this.personalizeTemplate(text, clinic) : '';
+
+    // Convert plain text to HTML if needed
+    personalizedHtml = this.textToHtml(personalizedHtml);
 
     const messageData = {
       from: `${this.fromName} <${this.fromEmail}>`,
