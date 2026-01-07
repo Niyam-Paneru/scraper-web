@@ -43,7 +43,8 @@ class MailgunService {
 
   /**
    * Replace template variables with actual values
-   * Variables: {{clinic_name}}, {{owner_name}}, {{city}}, {{state}}, {{website}}
+  * Variables: {{clinic_name}}, {{owner_name}}, {{city}}, {{state}}, {{website}}
+  * Owner is optional; leave blank if unknown. Do not invent.
    */
   personalizeTemplate(template, clinic) {
     let personalized = template;

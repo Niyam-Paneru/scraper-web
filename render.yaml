@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: dental-scraper
+    env: node
+    plan: free
+    buildCommand: npm install && cd client && npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_PLACES_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production

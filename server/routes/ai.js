@@ -27,7 +27,8 @@ router.get('/status', (req, res) => {
   res.json({
     gemini: {
       configured: !!process.env.GEMINI_API_KEY,
-      model: 'gemini-2.0-flash-lite'
+      model: 'gemini-2.0-flash-lite',
+      purpose: 'Optional: templated email fills, call scripts, lead scoring'
     },
     huggingface: {
       configured: huggingface.isConfigured(),
@@ -538,23 +539,31 @@ router.post('/generate-campaign', async (req, res) => {
 
   try {
     const emails = [];
-    
+    const baseBody = `Hi {{owner_name}},
+
+I noticed {{clinic_name}} in {{city}}. Many practices miss 30-40% of calls during lunch/after-hours.
+
+I built DentSignal—an AI receptionist that answers 24/7, books appointments, and cuts no-shows. Demo (60s): (904) 867-9643
+
+Worth a quick look?
+
+Best,
+{{sender_name}}
+{{sender_company}}`;
+
     for (const clinic of clinics.slice(0, 10)) { // Limit to 10 at a time
-      const prompt = `Generate a professional ${campaignType} email for a dental clinic.
+      const prompt = `Fill placeholders only. Keep wording and length. Do not add sentences.
 
-Clinic: ${clinic.clinic_name || clinic.name}
-Location: ${clinic.city || ''}, ${clinic.state || ''}
-${clinic.services ? `Services: ${clinic.services}` : ''}
-${senderInfo ? `Sender: ${senderInfo.name} from ${senderInfo.company}` : ''}
+Practice: ${clinic.clinic_name || clinic.name}
+City: ${clinic.city || ''}
+Owner (if known): ${clinic.owner_name || ''}
+Sender: ${senderInfo?.name || 'Your Name'} from ${senderInfo?.company || 'DentSignal'}
 
-Write a personalized, professional email that:
-1. Has a compelling subject line
-2. Opens with something specific about their clinic
-3. Clearly states the value proposition
-4. Has a clear call to action
-5. Is under 150 words
+Output JSON exactly:
+{"subject": "<max 12 words, include clinic and city>", "body": "<template with placeholders filled>"}
 
-Return as JSON: {"subject": "...", "body": "...", "callToAction": "..."}`;
+TEMPLATE:
+${baseBody}`;
 
       try {
         const response = await gemini.generate(prompt);
@@ -564,14 +573,14 @@ Return as JSON: {"subject": "...", "body": "...", "callToAction": "..."}`;
           emails.push({
             clinic: clinic.clinic_name || clinic.name,
             clinicEmail: clinic.email,
-            ...emailData
+            subject: emailData.subject,
+            body: emailData.body
           });
         }
       } catch (err) {
         console.error(`Failed to generate email for ${clinic.clinic_name}:`, err.message);
       }
       
-      // Small delay between requests
       await new Promise(r => setTimeout(r, 500));
     }
 

@@ -14,6 +14,13 @@ const router = express.Router();
 // In-memory job storage (in production, use a database)
 const jobs = new Map();
 
+// Simple per-minute scrape guard to avoid accidental overuse
+const scrapeRequests = [];
+const SCRAPE_RATE_LIMIT_PER_MINUTE = 12; // enough for solo use
+const MAX_RESULTS = 200; // safety cap for Places cost
+const MIN_DELAY_MS = 100;
+const MAX_DELAY_MS = 2000;
+
 /**
  * GET /api/status
  * Check server status and configuration
@@ -61,6 +68,22 @@ router.post('/scrape', async (req, res) => {
     return res.status(400).json({ error: 'Location is required' });
   }
 
+  // Rate limit per minute to avoid surprise API spend
+  const now = Date.now();
+  scrapeRequests.push(now);
+  while (scrapeRequests.length && now - scrapeRequests[0] > 60000) {
+    scrapeRequests.shift();
+  }
+  if (scrapeRequests.length > SCRAPE_RATE_LIMIT_PER_MINUTE) {
+    return res.status(429).json({
+      error: 'Too many scrape requests. Please wait a minute and try again.',
+      limitPerMinute: SCRAPE_RATE_LIMIT_PER_MINUTE
+    });
+  }
+
+  const cappedMax = Math.min(Math.max(parseInt(max, 10) || 0, 1), MAX_RESULTS);
+  const safeDelay = Math.min(Math.max(parseInt(delay, 10) || MIN_DELAY_MS, MIN_DELAY_MS), MAX_DELAY_MS);
+
   if (!process.env.GOOGLE_PLACES_KEY) {
     return res.status(400).json({ 
       error: 'Google Places API key not configured',
@@ -75,7 +98,8 @@ router.post('/scrape', async (req, res) => {
     status: 'running',
     source: 'google-places',
     location,
-    max,
+    max: cappedMax,
+    delay: safeDelay,
     createdAt: new Date().toISOString(),
     results: [],
     stats: {
@@ -90,10 +114,15 @@ router.post('/scrape', async (req, res) => {
   jobs.set(jobId, job);
 
   // Return immediately with job ID
-  res.json({ jobId, message: 'Scraping started with Google Places API (real data)' });
+  res.json({
+    jobId,
+    message: 'Scraping started with Google Places API (real data)',
+    max: cappedMax,
+    delay: safeDelay
+  });
 
   // Run scraper in background
-  runScraper(jobId, { location, max, delay, webhookUrl });
+  runScraper(jobId, { location, max: cappedMax, delay: safeDelay, webhookUrl });
 });
 
 /**

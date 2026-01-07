@@ -66,8 +66,8 @@ class GeminiService {
           parts: [{ text: fullPrompt }]
         }],
         generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1024,
+          temperature: 0.35,
+          maxOutputTokens: 700,
         },
         safetySettings: [
           { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE' },

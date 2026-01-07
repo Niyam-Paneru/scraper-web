@@ -60,6 +60,7 @@ function App() {
   const [formData, setFormData] = useState({
     location: '',
     max: 20,
+    delay: 200,
     webhookUrl: ''
   });
 
@@ -107,6 +108,9 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailSendProgress, setEmailSendProgress] = useState(null);
   const [selectedEmailClinics, setSelectedEmailClinics] = useState([]);
+  const [bulkPreview, setBulkPreview] = useState([]);
+  const [bulkPreviewSelected, setBulkPreviewSelected] = useState({});
+  const [showBulkPreview, setShowBulkPreview] = useState(false);
   const [customEmails, setCustomEmails] = useState(() => {
     const saved = localStorage.getItem('customEmails');
     return saved ? JSON.parse(saved) : [];
@@ -417,6 +421,9 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
       .then(setServerStatus)
       .catch(() => setServerStatus({ status: 'error' }));
 
+    // Ping metrics to ensure backend is reachable (ignored on failure)
+    fetch('/metrics').catch(() => {});
+
     fetch('/api/ai/status')
       .then(res => res.json())
       .then(setAiStatus)
@@ -515,6 +522,7 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
         body: JSON.stringify({
           location: formData.location,
           max: formData.max,
+          delay: formData.delay,
           webhookUrl: formData.webhookUrl
         })
       });
@@ -526,7 +534,7 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
         return;
       }
       
-      const { jobId } = data;
+      const { jobId, max: appliedMax, delay: appliedDelay } = data;
 
       // Poll for job completion
       const pollJob = async () => {
@@ -553,6 +561,9 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
           }
         }
       };
+
+      // Track job immediately for progress display
+      setCurrentJob({ id: jobId, status: 'running', location: formData.location, results: [], max: appliedMax, delay: appliedDelay });
       
       pollJob();
     } catch (err) {
@@ -989,18 +1000,69 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
     }
   };
 
+  const personalizeTemplate = (template, clinic) => {
+    if (!template) return '';
+    const variables = {
+      '{{clinic_name}}': clinic.clinic_name || clinic.name || 'there',
+      '{{owner_name}}': clinic.owner_name || 'there',
+      '{{city}}': clinic.city || '',
+      '{{state}}': clinic.state || '',
+      '{{website}}': clinic.website || '',
+      '{{phone}}': clinic.phone || clinic.phone_e164 || '',
+      '{{address}}': clinic.address || '',
+      '{{rating}}': clinic.rating ? `${clinic.rating} stars` : ''
+    };
+    let out = template;
+    Object.entries(variables).forEach(([key, val]) => {
+      out = out.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), val);
+    });
+    return out;
+  };
+
+  const buildBulkPreview = () => {
+    return selectedEmailClinics
+      .filter(c => c.email)
+      .map(c => ({
+        clinic: c,
+        subject: personalizeTemplate(emailSubject, c),
+        body: personalizeTemplate(emailBody, c)
+      }));
+  };
+
+  const handlePreviewBulkEmails = () => {
+    const previews = buildBulkPreview();
+    if (previews.length === 0) {
+      showToast('No clinics with emails selected', 'error');
+      return;
+    }
+    setBulkPreview(previews);
+    // select all by default
+    const sel = {};
+    previews.forEach(p => { sel[p.clinic.clinic_id] = true; });
+    setBulkPreviewSelected(sel);
+    setShowBulkPreview(true);
+  };
+
   // Send bulk emails
   const handleSendBulkEmails = async () => {
-    const recipients = selectedEmailClinics
+    let recipients = selectedEmailClinics
       .filter(c => c.email)
       .map(c => ({ email: c.email, clinic: c }));
+
+    if (showBulkPreview && bulkPreview.length > 0) {
+      recipients = bulkPreview
+        .filter(p => bulkPreviewSelected[p.clinic.clinic_id])
+        .map(p => ({ email: p.clinic.email, clinic: p.clinic }));
+    }
     
     if (recipients.length === 0) {
       showToast('No clinics with emails selected', 'error');
       return;
     }
     
-    if (!confirm(`Send emails to ${recipients.length} clinics?`)) {
+    // use existing preview panel as confirmation; if not open, open it first
+    if (!showBulkPreview) {
+      handlePreviewBulkEmails();
       return;
     }
     
@@ -1040,6 +1102,8 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
     } finally {
       setIsSendingEmail(false);
       setEmailSendProgress(null);
+      setShowBulkPreview(false);
+      setBulkPreview([]);
     }
   };
 
@@ -1310,6 +1374,28 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
                   </div>
                 </div>
               )}
+
+              {/* Quick key checks */}
+              <div className="status-card">
+                <div className="status-row">
+                  <span className="status-label">Google Places</span>
+                  <span className={`status-chip ${serverStatus?.hasGooglePlacesKey ? 'ok' : 'warn'}`}>
+                    {serverStatus?.hasGooglePlacesKey ? 'Connected' : 'Missing'}
+                  </span>
+                </div>
+                <div className="status-row">
+                  <span className="status-label">Gemini (AI)</span>
+                  <span className={`status-chip ${aiStatus?.gemini?.configured ? 'ok' : 'warn'}`}>
+                    {aiStatus?.gemini?.configured ? 'Connected' : 'Missing'}
+                  </span>
+                </div>
+                <div className="status-row">
+                  <span className="status-label">Backend</span>
+                  <span className={`status-chip ${serverStatus?.status === 'ok' ? 'ok' : 'warn'}`}>
+                    {serverStatus?.status === 'ok' ? 'Reachable' : 'Check server'}
+                  </span>
+                </div>
+              </div>
               
               {/* Hero Search Section */}
               <div className="hero-search">
@@ -1332,12 +1418,24 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
                         <input
                           type="number"
                           min="1"
-                          max="100"
+                          max="200"
                           value={formData.max}
                           onChange={(e) => setFormData({ ...formData, max: parseInt(e.target.value) || 20 })}
                           className="count-input"
                         />
                         <span className="count-label">results</span>
+                      </div>
+                      <div className="search-count">
+                        <input
+                          type="number"
+                          min="100"
+                          max="2000"
+                          step="50"
+                          value={formData.delay}
+                          onChange={(e) => setFormData({ ...formData, delay: parseInt(e.target.value) || 200 })}
+                          className="count-input"
+                        />
+                        <span className="count-label">ms delay</span>
                       </div>
                       <button 
                         type="submit" 
@@ -1370,6 +1468,12 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
                       <p className="results-count">
                         <span className="count-number">{currentJob.results?.length || 0}</span> dental clinics found
                         <span className="results-source">via Google Places</span>
+                        {currentJob.max && (
+                          <span className="results-cap">/ {currentJob.max} max</span>
+                        )}
+                        {currentJob.delay && (
+                          <span className="results-delay">· {currentJob.delay} ms delay</span>
+                        )}
                       </p>
                     </div>
                     <div className="results-actions">
@@ -1833,10 +1937,10 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
                         <span className="bulk-count">{selectedEmailClinics.length} contacts selected</span>
                         <button 
                           className="btn-bulk-send"
-                          onClick={handleSendBulkEmails}
+                          onClick={handlePreviewBulkEmails}
                           disabled={isSendingEmail || !emailStatus?.configured}
                         >
-                          {isSendingEmail ? 'Sending...' : `Send to ${selectedEmailClinics.length} contacts`}
+                          {isSendingEmail ? 'Sending...' : `Preview & send ${selectedEmailClinics.length}`}
                         </button>
                       </div>
                     )}
@@ -1851,6 +1955,59 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
                           />
                         </div>
                         <span className="progress-text">{emailSendProgress.current} / {emailSendProgress.total} sent</span>
+                      </div>
+                    )}
+
+                    {/* Bulk Preview Panel */}
+                    {showBulkPreview && bulkPreview.length > 0 && (
+                      <div className="bulk-preview">
+                        <div className="bulk-preview-header">
+                          <div>
+                            <h4>Preview ({bulkPreview.length})</h4>
+                            <p>Placeholders filled per clinic. No AI changes.</p>
+                          </div>
+                          <div className="bulk-preview-actions">
+                            <button className="btn btn-secondary" onClick={() => setShowBulkPreview(false)}>Close</button>
+                            <button className="btn btn-primary" onClick={handleSendBulkEmails} disabled={isSendingEmail}>
+                              {isSendingEmail ? 'Sending...' : 'Send all now'}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="bulk-preview-grid">
+                          {bulkPreview.map((item, idx) => (
+                            <div key={idx} className="preview-card">
+                              <div className="preview-select-row">
+                                <label className="preview-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!bulkPreviewSelected[item.clinic.clinic_id]}
+                                    onChange={() => setBulkPreviewSelected(prev => ({
+                                      ...prev,
+                                      [item.clinic.clinic_id]: !prev[item.clinic.clinic_id]
+                                    }))}
+                                  />
+                                  <span>Send this email</span>
+                                </label>
+                                <button
+                                  className="btn btn-ghost"
+                                  onClick={() => {
+                                    setBulkPreviewSelected(prev => ({ ...prev, [item.clinic.clinic_id]: false }));
+                                  }}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                              <div className="preview-head">
+                                <div className="preview-title">{item.clinic.clinic_name || item.clinic.name}</div>
+                                <div className="preview-email">{item.clinic.email}</div>
+                              </div>
+                              <div className="preview-subject"><strong>Subject:</strong> {item.subject}</div>
+                              <div className="preview-body">
+                                <pre>{item.body}</pre>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>

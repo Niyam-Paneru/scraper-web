@@ -12,6 +12,7 @@
     "start": "node server/index.js",
     "scrape": "node scripts/dental_scraper.js",
     "test": "node --test tests/parsePhone.test.js",
+    "test:smoke": "node --test tests/smoke.test.js",
     "install:all": "npm install && cd client && npm install"
   },
   "dependencies": {
@@ -29,6 +30,9 @@
     "robots-parser": "^3.0.1",
     "uuid": "^9.0.1",
     "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "supertest": "^6.3.4"
   },
   "engines": {
     "node": ">=18"

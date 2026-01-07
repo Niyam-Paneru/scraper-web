@@ -80,21 +80,16 @@ git push -u origin main
    - Set root directory to `client`
    - Deploy!
 
-### Option 2: Deploy to Railway (Full Stack - Recommended)
-
-1. Create account at [railway.app](https://railway.app)
-2. New Project → Deploy from GitHub repo
-3. Add environment variable: `GEMINI_API_KEY`
-4. Railway auto-detects Node.js and deploys
-
-### Option 3: Deploy to Render
+### Option 2: Deploy to Render (Full Stack)
 
 1. Create account at [render.com](https://render.com)
-2. New Web Service → Connect GitHub repo
-3. Configure:
-   - Build Command: `npm install && cd client && npm install && npm run build`
-   - Start Command: `npm start`
-4. Add environment variable: `GEMINI_API_KEY`
+2. New Web Service → Connect GitHub repo (Render auto-detects `render.yaml`)
+3. If configuring manually, use:
+  - Build Command: `npm install && cd client && npm install && npm run build`
+  - Start Command: `npm start`
+  - Health check path: `/health`
+4. Env vars: `GEMINI_API_KEY`, `GOOGLE_PLACES_KEY` (both marked as Secret)
+5. Use the free tier Web Service; bump instance size only if you need more RAM/CPU
 
 ### Environment Variables
 
@@ -103,6 +98,11 @@ git push -u origin main
 | `GEMINI_API_KEY` | Yes | Your Gemini API key from Google AI Studio |
 | `PORT` | No | Server port (default: 3001) |
 | `NODE_ENV` | No | Set to `production` for deployment |
+
+### Scrape safety limits
+- Max results per job: 200 (hard cap to control Places spend)
+- Min/max per-result delay: 100-2000 ms
+- Rate limit: 12 scrape jobs per minute (per instance)
 
 ## 📁 Project Structure
 
@@ -152,6 +152,7 @@ git push -u origin main
 |--------|----------|-------------|
 | GET | `/api/ai/status` | Gemini config status |
 | GET | `/api/ai/usage` | API usage stats |
+| GET | `/metrics` | Prometheus-style uptime/usage metrics |
 | POST | `/api/ai/chat` | Chat with AI |
 | POST | `/api/ai/score-lead` | Score single clinic |
 | POST | `/api/ai/score-all-leads` | Batch score clinics |
