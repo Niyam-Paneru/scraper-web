@@ -107,7 +107,8 @@
 html, body, #root {
   height: 100%;
   width: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 body {
@@ -137,7 +138,8 @@ body {
   flex-direction: column;
   height: 100vh;
   width: 100vw;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ===== HEADER ===== */
@@ -258,7 +260,8 @@ body {
 .main-layout {
   display: flex;
   flex: 1;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ===== SIDEBAR ===== */
@@ -1386,6 +1389,12 @@ body {
 }
 
 @media (max-width: 768px) {
+  html, body, #root, .app-layout, .main-layout {
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+
   .sidebar {
     display: none;
   }
@@ -1446,6 +1455,47 @@ body {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .email-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    max-height: none;
+    gap: 14px;
+  }
+
+  .contacts-table {
+    overflow-x: hidden;
+  }
+
+  .contacts-table .table-header {
+    display: none;
+  }
+
+  .contacts-table .table-row {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 12px;
+  }
+
+  .table-row .col-actions,
+  .table-row .col-status,
+  .table-row .col-location,
+  .table-row .col-email,
+  .table-row .col-name,
+  .table-row .col-check {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .table-row .col-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .bulk-preview-grid {
+    grid-template-columns: 1fr;
   }
   
   .clinic-card-main { padding: 14px; }
