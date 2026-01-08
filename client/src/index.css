@@ -1392,6 +1392,120 @@ body {
   
   .main-layout {
     flex-direction: column;
+    padding: 0 12px 12px;
+  }
+  
+  .header {
+    padding: 0 14px;
+    gap: 10px;
+  }
+  
+  .header-left { gap: 10px; }
+  .header-nav { display: none; }
+  .status-indicators { display: none; }
+  
+  .main-content {
+    padding: 18px 0 48px;
+  }
+  
+  .hero-search {
+    padding: 28px 18px;
+    margin: 0 8px 18px;
+  }
+  
+  .search-input-group {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  
+  .search-icon { padding-left: 0; }
+  
+  .search-count {
+    width: 100%;
+    justify-content: space-between;
+    border-left: none;
+    padding: 0;
+    background: transparent;
+  }
+  
+  .count-input {
+    width: 90px;
+  }
+  
+  .btn-large {
+    width: 100%;
+  }
+  
+  .results-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .results-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  
+  .clinic-card-main { padding: 14px; }
+  .expanded-grid { grid-template-columns: 1fr; }
+  
+  .email-tabs {
+    overflow-x: auto;
+    padding-bottom: 8px;
+    gap: 8px;
+  }
+  .email-tab { white-space: nowrap; }
+  
+  .contacts-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .table-header {
+    display: none;
+  }
+  
+  .table-body .table-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    margin-bottom: 10px;
+  }
+  
+  .table-row .col-check,
+  .table-row .col-actions {
+    order: 0;
+  }
+  
+  .table-row .col-name,
+  .table-row .col-email,
+  .table-row .col-location,
+  .table-row .col-status {
+    display: block;
+  }
+  
+  .bulk-actions-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  
+  .bulk-preview {
+    margin: 10px 0;
+  }
+  
+  .bulk-preview-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .queue-status-section {
+    margin-top: 12px;
   }
   
   .form-row {
