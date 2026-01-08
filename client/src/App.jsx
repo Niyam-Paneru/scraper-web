@@ -130,6 +130,11 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
   });
   const [editingTemplate, setEditingTemplate] = useState(null);
 
+  // Email Queue state
+  const [queueStatus, setQueueStatus] = useState(null);
+  const [pipelineStats, setPipelineStats] = useState(null);
+  const [withFollowups, setWithFollowups] = useState(true);
+
   // Apply theme to document
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -447,11 +452,29 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
       })
       .catch(console.error);
 
+    // Load queue status and pipeline
+    const loadQueueStatus = () => {
+      fetch('/api/email/queue/status')
+        .then(res => res.json())
+        .then(setQueueStatus)
+        .catch(console.error);
+      
+      fetch('/api/email/pipeline')
+        .then(res => res.json())
+        .then(setPipelineStats)
+        .catch(console.error);
+    };
+    loadQueueStatus();
+    const queueInterval = setInterval(loadQueueStatus, 15000);
+
     loadUsage();
     
     // Refresh usage every 30 seconds
     const interval = setInterval(loadUsage, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      clearInterval(queueInterval);
+    };
   }, [loadUsage]);
 
   // Load jobs
@@ -1043,19 +1066,31 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
     setShowBulkPreview(true);
   };
 
-  // Send bulk emails
+  // Send bulk emails via queue (throttled with follow-ups)
   const handleSendBulkEmails = async () => {
-    let recipients = selectedEmailClinics
+    let emailsToSend = selectedEmailClinics
       .filter(c => c.email)
-      .map(c => ({ email: c.email, clinic: c }));
+      .map(c => ({
+        email: c.email,
+        clinic: c,
+        subject: personalizeTemplate(emailSubject, c),
+        html: personalizeTemplate(emailBody, c),
+        templateType: 'intro'
+      }));
 
     if (showBulkPreview && bulkPreview.length > 0) {
-      recipients = bulkPreview
+      emailsToSend = bulkPreview
         .filter(p => bulkPreviewSelected[p.clinic.clinic_id])
-        .map(p => ({ email: p.clinic.email, clinic: p.clinic }));
+        .map(p => ({
+          email: p.clinic.email,
+          clinic: p.clinic,
+          subject: p.subject,
+          html: p.body,
+          templateType: 'intro'
+        }));
     }
     
-    if (recipients.length === 0) {
+    if (emailsToSend.length === 0) {
       showToast('No clinics with emails selected', 'error');
       return;
     }
@@ -1067,43 +1102,40 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
     }
     
     setIsSendingEmail(true);
-    setEmailSendProgress({ current: 0, total: recipients.length, sent: 0, failed: 0 });
     
     try {
-      const res = await fetch('/api/email/send-bulk', {
+      const res = await fetch('/api/email/queue/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          recipients,
-          template: {
-            subject: emailSubject,
-            html: emailBody
-          },
-          delayMs: 2000
+          emails: emailsToSend,
+          withFollowups: withFollowups
         })
       });
       const data = await res.json();
       
       if (data.success) {
-        showToast(`✅ Sent ${data.sent} emails (${data.failed} failed)`, 'success');
-        // Update lead statuses for sent emails
-        recipients.forEach(r => {
-          const clinic = currentJob?.results?.find(c => c.email === r.email);
+        showToast(`✅ Added ${data.added} emails to queue${withFollowups ? ' with follow-ups' : ''}`, 'success');
+        // Update lead statuses for queued emails
+        emailsToSend.forEach(item => {
+          const clinic = currentJob?.results?.find(c => c.email === item.email);
           if (clinic) {
             updateLeadStatus(clinic.clinic_id, 'contacted');
           }
         });
         setSelectedEmailClinics([]);
+        setShowBulkPreview(false);
+        setBulkPreview([]);
+        // Refresh queue status
+        fetch('/api/email/queue/status').then(r => r.json()).then(setQueueStatus);
+        fetch('/api/email/pipeline').then(r => r.json()).then(setPipelineStats);
       } else {
-        showToast(data.error || 'Failed to send emails', 'error');
+        showToast(data.error || 'Failed to queue emails', 'error');
       }
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
       setIsSendingEmail(false);
-      setEmailSendProgress(null);
-      setShowBulkPreview(false);
-      setBulkPreview([]);
     }
   };
 
@@ -1220,25 +1252,51 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
               <div className="stat-item">
                 <span className="stat-dot blue"></span>
                 <span className="stat-label">New Leads</span>
-                <span className="stat-count">{currentJob?.results?.filter(r => !leadStatuses[r.clinic_id] || leadStatuses[r.clinic_id] === 'new').length || 0}</span>
+                <span className="stat-count">{pipelineStats?.new || currentJob?.results?.filter(r => !leadStatuses[r.clinic_id] || leadStatuses[r.clinic_id] === 'new').length || 0}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-dot yellow"></span>
                 <span className="stat-label">Emailed</span>
-                <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'contacted').length || 0}</span>
+                <span className="stat-count">{pipelineStats?.emailed || currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'contacted').length || 0}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-dot green"></span>
-                <span className="stat-label">Demo Booked</span>
-                <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'interested').length || 0}</span>
+                <span className="stat-label">Replied</span>
+                <span className="stat-count">{pipelineStats?.replied || 0}</span>
               </div>
               <div className="stat-item">
                 <span className="stat-dot purple"></span>
                 <span className="stat-label">Closed 💰</span>
-                <span className="stat-count">{currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'won').length || 0}</span>
+                <span className="stat-count">{pipelineStats?.closed || currentJob?.results?.filter(r => leadStatuses[r.clinic_id] === 'won').length || 0}</span>
               </div>
             </div>
           </div>
+
+          {/* Email Queue Status */}
+          {queueStatus && (queueStatus.queue.pending > 0 || queueStatus.scheduled > 0) && (
+            <div className="sidebar-section queue-status-section">
+              <h3 className="sidebar-title">📧 Email Queue</h3>
+              <div className="queue-stats">
+                <div className="queue-stat-row">
+                  <span>Pending</span>
+                  <span className="queue-count">{queueStatus.queue.pending}</span>
+                </div>
+                <div className="queue-stat-row">
+                  <span>Scheduled follow-ups</span>
+                  <span className="queue-count">{queueStatus.scheduled}</span>
+                </div>
+                <div className="queue-stat-row">
+                  <span>Sent today</span>
+                  <span className="queue-count">{queueStatus.today.sent}/{queueStatus.today.limit}</span>
+                </div>
+                {queueStatus.nextSendIn > 0 && queueStatus.queue.pending > 0 && (
+                  <div className="queue-next-send">
+                    Next send in {Math.round(queueStatus.nextSendIn / 60)} min
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* DentSignal Demo CTA */}
           <div className="sidebar-section demo-cta-section">
@@ -1855,6 +1913,24 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
                           />
                           <span>Show sent</span>
                         </label>
+                        <button
+                          className="btn-export"
+                          onClick={() => {
+                            fetch('/api/email/contacts/csv')
+                              .then(res => res.blob())
+                              .then(blob => {
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = 'contacts.csv';
+                                a.click();
+                                window.URL.revokeObjectURL(url);
+                              })
+                              .catch(() => showToast('Failed to export contacts', 'error'));
+                          }}
+                        >
+                          Export CSV
+                        </button>
                         <button className="btn-select-all" onClick={selectAllWithEmail}>
                           {selectedEmailClinics.length === clinicsWithEmail.length ? 'Deselect All' : 'Select All'}
                         </button>
@@ -1964,12 +2040,20 @@ If you'd prefer not to receive emails from us, just reply with "unsubscribe".`;
                         <div className="bulk-preview-header">
                           <div>
                             <h4>Preview ({bulkPreview.length})</h4>
-                            <p>Placeholders filled per clinic. No AI changes.</p>
+                            <p>Queued with throttling (1 email every 5 min)</p>
                           </div>
                           <div className="bulk-preview-actions">
+                            <label className="followup-toggle">
+                              <input
+                                type="checkbox"
+                                checked={withFollowups}
+                                onChange={(e) => setWithFollowups(e.target.checked)}
+                              />
+                              <span>Auto follow-ups (3 + 7 days)</span>
+                            </label>
                             <button className="btn btn-secondary" onClick={() => setShowBulkPreview(false)}>Close</button>
                             <button className="btn btn-primary" onClick={handleSendBulkEmails} disabled={isSendingEmail}>
-                              {isSendingEmail ? 'Sending...' : 'Send all now'}
+                              {isSendingEmail ? 'Queuing...' : 'Queue Campaign'}
                             </button>
                           </div>
                         </div>

@@ -2209,6 +2209,21 @@ body {
   align-items: center;
 }
 
+.btn-export {
+  padding: 8px 12px;
+  border: 1px solid var(--border-light);
+  background: rgba(14,165,233,0.08);
+  color: var(--primary-dark);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-export:hover {
+  background: rgba(14,165,233,0.14);
+  border-color: rgba(14,165,233,0.3);
+}
+
 .filter-checkbox {
   display: flex;
   align-items: center;
@@ -2576,6 +2591,65 @@ body {
   font-family: 'Inter', sans-serif;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* Email Queue Status Sidebar */
+.queue-status-section {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(99, 102, 241, 0.08));
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: var(--radius-md);
+  padding: 14px !important;
+}
+
+.queue-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queue-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.queue-count {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.queue-next-send {
+  font-size: 11px;
+  color: var(--success);
+  background: var(--success-light);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  margin-top: 4px;
+}
+
+/* Follow-up Toggle */
+.followup-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px 10px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: var(--radius-sm);
+}
+
+.followup-toggle input {
+  accent-color: var(--success);
+}
+
+.followup-toggle:hover {
+  background: rgba(16, 185, 129, 0.15);
 }
 
 /* ===== COMPOSE VIEW ===== */

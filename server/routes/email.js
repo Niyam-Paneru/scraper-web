@@ -1,10 +1,11 @@
 /**
  * Email Campaign Routes
- * Handles email template management and sending via Mailgun
+ * Handles email template management, sending via Mailgun, and queue management
  */
 
 import express from 'express';
 import mailgunService from '../services/mailgun.js';
+import emailQueueService from '../services/emailQueue.js';
 
 const router = express.Router();
 
@@ -390,6 +391,195 @@ router.get('/variables', (req, res) => {
       { key: '{{rating}}', description: 'Google rating (e.g., "4.8 stars")' }
     ]
   });
+});
+
+// ============================================
+// EMAIL QUEUE ENDPOINTS
+// ============================================
+
+/**
+ * GET /api/email/queue/status
+ * Get email queue status and stats
+ */
+router.get('/queue/status', (req, res) => {
+  res.json(emailQueueService.getStatus());
+});
+
+/**
+ * POST /api/email/queue/add
+ * Add emails to the throttled queue with optional follow-ups
+ */
+router.post('/queue/add', (req, res) => {
+  const { emails, withFollowups = true } = req.body;
+
+  if (!emails || !Array.isArray(emails) || emails.length === 0) {
+    return res.status(400).json({ error: 'Emails array is required' });
+  }
+
+  // Validate emails
+  for (const item of emails) {
+    if (!item.email || !item.subject || !item.html) {
+      return res.status(400).json({ error: 'Each email needs email, subject, and html' });
+    }
+  }
+
+  const result = emailQueueService.addToQueue(emails, withFollowups);
+  res.json({
+    success: true,
+    ...result,
+    message: `Added ${result.added} emails to queue${withFollowups ? ' with follow-ups' : ''}`
+  });
+});
+
+/**
+ * POST /api/email/queue/cancel
+ * Cancel pending emails for a contact
+ */
+router.post('/queue/cancel', (req, res) => {
+  const { contactId } = req.body;
+
+  if (!contactId) {
+    return res.status(400).json({ error: 'contactId is required' });
+  }
+
+  emailQueueService.cancelForContact(contactId);
+  res.json({ success: true, message: 'Pending emails cancelled' });
+});
+
+/**
+ * POST /api/email/queue/cleanup
+ * Clean up old completed/failed items
+ */
+router.post('/queue/cleanup', (req, res) => {
+  emailQueueService.cleanup();
+  res.json({ success: true, message: 'Queue cleaned up' });
+});
+
+// ============================================
+// PIPELINE / CONTACTS ENDPOINTS
+// ============================================
+
+/**
+ * GET /api/email/pipeline
+ * Get pipeline stats (auto-calculated from contacts)
+ */
+router.get('/pipeline', (req, res) => {
+  res.json(emailQueueService.getPipelineStats());
+});
+
+/**
+ * GET /api/email/contacts
+ * Get all tracked contacts
+ */
+router.get('/contacts', (req, res) => {
+  res.json(emailQueueService.getContacts());
+});
+
+/**
+ * GET /api/email/contacts/csv
+ * Export all tracked contacts as CSV (name, email, phone, city, rating, website, status)
+ */
+router.get('/contacts/csv', (req, res) => {
+  const contacts = Object.values(emailQueueService.getContacts());
+
+  const headers = ['name', 'email', 'phone', 'city', 'rating', 'website', 'status'];
+  const rows = [headers.join(',')];
+
+  for (const c of contacts) {
+    const clinic = c.clinic || {};
+    const vals = [
+      clinic.clinic_name || clinic.name || '',
+      c.email || clinic.email || '',
+      clinic.phone || clinic.phone_e164 || '',
+      clinic.city || '',
+      clinic.rating || '',
+      clinic.website || '',
+      c.status || 'new'
+    ].map(val => {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      return str.includes(',') || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str;
+    });
+
+    rows.push(vals.join(','));
+  }
+
+  const csv = rows.join('\n');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="contacts.csv"');
+  res.send(csv);
+});
+
+/**
+ * POST /api/email/contacts/:id/status
+ * Update contact status
+ */
+router.post('/contacts/:id/status', (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const validStatuses = ['new', 'emailed', 'replied', 'demo_booked', 'closed', 'not_interested'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+  }
+
+  const updated = emailQueueService.updateContactStatus(id, status);
+  if (updated) {
+    res.json({ success: true, message: 'Status updated' });
+  } else {
+    res.status(404).json({ error: 'Contact not found' });
+  }
+});
+
+// ============================================
+// MAILGUN WEBHOOKS
+// ============================================
+
+/**
+ * POST /api/email/webhook/reply
+ * Mailgun webhook for incoming replies
+ * Set this URL in Mailgun dashboard: Routes -> Create Route
+ */
+router.post('/webhook/reply', (req, res) => {
+  // Mailgun sends reply data in the request body
+  const senderEmail = req.body.sender || req.body.from;
+  const subject = req.body.subject;
+  const bodyPlain = req.body['body-plain'];
+
+  console.log(`📧 Webhook received - Reply from: ${senderEmail}, Subject: ${subject}`);
+
+  if (senderEmail) {
+    const handled = emailQueueService.handleReply(senderEmail);
+    if (handled) {
+      console.log(`📧 Contact ${senderEmail} moved to replied status`);
+    }
+  }
+
+  // Always return 200 to Mailgun
+  res.status(200).json({ received: true });
+});
+
+/**
+ * POST /api/email/webhook/delivered
+ * Mailgun webhook for delivery confirmations (optional)
+ */
+router.post('/webhook/delivered', (req, res) => {
+  const recipient = req.body.recipient;
+  console.log(`📧 Email delivered to: ${recipient}`);
+  res.status(200).json({ received: true });
+});
+
+/**
+ * POST /api/email/webhook/bounced
+ * Mailgun webhook for bounces
+ */
+router.post('/webhook/bounced', (req, res) => {
+  const recipient = req.body.recipient;
+  const error = req.body.error;
+  console.log(`📧 Email bounced for ${recipient}: ${error}`);
+  
+  // Could mark contact as invalid here
+  res.status(200).json({ received: true });
 });
 
 export default router;
